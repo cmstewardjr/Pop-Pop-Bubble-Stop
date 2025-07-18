@@ -256,8 +256,8 @@ const audioToggleButton = document.getElementById('audio-toggle-button');
 
 const COLS = 12, ROWS = 14, SHOTS_UNTIL_LOSS = 5;
 const BOMB_INTERVAL = 25 * 60;
-const LEVEL_ROW_DROP_SPEEDS = { 1: 15 * 60, 2: 12 * 60, 3: 8 * 60 };
-const FLOATING_POINTS_DURATION = 75, POP_PARTICLE_COUNT = 8, POP_PARTICLE_DURATION = 40;
+const LEVEL_ROW_DROP_SPEEDS = { 1: 12 * 60, 2: 12 * 60, 3: 12 * 60, 4: 12 * 60 };
+const FLOATING_POINTS_DURATION = 50, POP_PARTICLE_COUNT = 8, POP_PARTICLE_DURATION = 60;
 const PADDING = 5;
 const BUBBLE_RADIUS = (canvas.width - PADDING * 2) / (COLS * 2 + 1);
 const HEX_WIDTH = BUBBLE_RADIUS * 2, HEX_HEIGHT = Math.sqrt(3) * BUBBLE_RADIUS;
@@ -267,16 +267,18 @@ const GAME_OVER_LINE_Y = canvas.height - BUBBLE_RADIUS * 4;
 const ALL_COLORS = {
     1: ['#FF5733', '#33FF57', '#3357FF', '#FF33A1', '#A133FF', '#FFFF33'],
     2: ['#FFC4E1', '#A1C9F4', '#B2F7C3', '#FFF7AE', '#D9BFF5', '#FFD8B1'],
-    3: ['#FFD700', '#C0C0C0', '#CD7F32', '#6A738B', '#50C878', '#E39695']
+    3: ['#FFD700', '#C0C0C0', '#CD7F32', '#6A738B', '#50C878', '#E39695'],
+    4: ['#E6E6FA', '#D8BFD8', '#B0E0E6', '#FFB6C1', '#C0C0C0', '#F0E68C']
 };
 const LEVEL_RAINBOW_COLORS = {
     1: ['#FF5733', '#FFFF33', '#33FF57', '#3357FF', '#A133FF'],
     2: ['#FFC4E1', '#FFF7AE', '#B2F7C3', '#A1C9F4', '#D9BFF5'],
-    3: ['#FFD700', '#E39695', '#50C878', '#6A738B', '#C0C0C0']
+    3: ['#FFD700', '#E39695', '#50C878', '#6A738B', '#C0C0C0'],
+    4: ['#E6E6FA', '#D8BFD8', '#B0E0E6', '#FFB6C1', '#C0C0C0']
 };
-const LEVEL_UP_SCORES = { 1: 3500, 2: 8500 };
-const LEVEL_BACKGROUNDS = { 1: 'rgba(214, 232, 250, 0.65)', 2: 'rgba(50, 60, 90, 0.7)', 3: 'rgba(80, 75, 70, 0.75)' };
-const MAX_LEVEL = 3;
+const LEVEL_UP_SCORES = { 1: 5000, 2: 10000, 3: 15000 };
+const LEVEL_BACKGROUNDS = { 1: 'rgba(214, 232, 250, 0.65)', 2: 'rgba(50, 60, 90, 0.7)', 3: 'rgba(80, 75, 70, 0.75)', 4: 'rgba(45, 20, 60, 0.8)' };
+const MAX_LEVEL = 4;
 const SPECIALS = { 'RAINBOW': 'rainbow', 'LIFE': 'life', 'BOMB': 'bomb', 'BRICK': 'brick', 'PAINT': 'paint', 'STATIC': 'static' };
 const isMobile = /Mobi|Android|iPhone/i.test(navigator.userAgent);
 
@@ -352,7 +354,7 @@ let backgroundBubbles = [];
 let level, currentColors, rainbowGradientOffset;
 let screenShake = { magnitude: 0, duration: 0 };
 let comboAnnouncer = { text: '', life: 0, x: 0, y: 0 };
-let staticSparks = [], staticBubbleSparks = [];
+let staticSparks = [], staticBubbleSparks = [], glitterParticles = [];
 
 function updateLevelStyles(newLevel) {
     if (gameContainer && LEVEL_BACKGROUNDS[newLevel]) {
@@ -399,7 +401,7 @@ function generateNextBubble() {
 function resetForNextLevel() {
     grid = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
     shotsFired = 0; isFiring = false; rowDropTimer = 0; bombTimer = 0; aimClickCounter = 0; newRowsDropped = 0;
-    popAnimations = []; floatingPoints = []; fireworks = []; rain = []; bombSparks = []; shockwaves = []; staticSparks = []; staticBubbleSparks = [];
+    popAnimations = []; floatingPoints = []; fireworks = []; rain = []; bombSparks = []; shockwaves = []; staticSparks = []; staticBubbleSparks = []; glitterParticles = [];
     gridRowOffset = 0;
 
     const initialPaletteSize = Math.min(currentColors.length, 4);
@@ -417,7 +419,7 @@ function resetForNextLevel() {
         }
     }
 
-    if (level === 2 || level === 3) {
+    if (level === 2 || level === 3 || level === 4) {
         let placed = false;
         while (!placed) {
             const r = Math.floor(Math.random() * 4);
@@ -541,32 +543,41 @@ function drawBubble(context, bubble) {
             ctx.save();
             ctx.beginPath();
             ctx.arc(x, y, radius, 0, Math.PI * 2);
-            ctx.clip();
+            ctx.clip(); // Clip to the circle shape
+
+            // Draw the brick texture
             ctx.fillStyle = '#4a2d1a'; 
             ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-            
             ctx.strokeStyle = '#b0b0b0'; 
             ctx.lineWidth = 1.5;
-            
             const brickHeight = radius * 0.5;
             const brickWidth = radius;
-
             for(let i = -2; i <= 2; i++) {
                 const rowY = y + i * brickHeight;
                 for(let j = -1; j <= 1; j++) {
                     const colX = x + j * brickWidth + ((i % 2) * (brickWidth / 2));
-                    
                     const brickGrad = ctx.createLinearGradient(colX, rowY - brickHeight / 2, colX, rowY + brickHeight / 2);
-                    brickGrad.addColorStop(0, '#c26a4a');
-                    brickGrad.addColorStop(1, '#9e492a');
+                    brickGrad.addColorStop(0, '#c26a4a'); brickGrad.addColorStop(1, '#9e492a');
                     ctx.fillStyle = brickGrad;
-                    
                     ctx.fillRect(colX - brickWidth/2, rowY - brickHeight/2, brickWidth, brickHeight);
                     ctx.strokeRect(colX - brickWidth/2, rowY - brickHeight/2, brickWidth, brickHeight);
                 }
             }
-            ctx.restore();
+
+            // Draw the bubble shine on top
+            let brickShadowGrad = context.createRadialGradient(x + radius * 0.4, y + radius * 0.5, radius * 0.5, x, y, radius * 1.5);
+            brickShadowGrad.addColorStop(0, 'rgba(0,0,0,0.4)'); brickShadowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+            context.fillStyle = brickShadowGrad;
+            context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+
+            let brickHighlightGrad = context.createRadialGradient(x - radius * 0.4, y - radius * 0.5, 0, x - radius * 0.4, y - radius * 0.5, radius * 0.6);
+            brickHighlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.5)'); brickHighlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            context.fillStyle = brickHighlightGrad;
+            context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+
+            ctx.restore(); // Restore from clipping
             
+            // Draw crack if health is low
             if (bubble.health <= 1) {
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
                 ctx.lineWidth = 2;
@@ -638,6 +649,19 @@ function drawStaticBubbleSparks() {
     });
     ctx.restore();
 }
+function drawGlitterParticles() {
+    if (level !== 4) return;
+    ctx.save();
+    glitterParticles.forEach(p => {
+        const progress = p.life / p.duration;
+        ctx.globalAlpha = 1 - progress;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * (1 - progress), 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.restore();
+}
 
 function updatePopAnimations() { for(let i=popAnimations.length-1;i>=0;i--){const p=popAnimations[i];p.life++;p.x+=p.vx;p.y+=p.vy;p.vx*=0.97;p.vy*=0.97;if(p.life>=p.duration){popAnimations.splice(i,1)}}}
 function updateFloatingPoints() { for(let i=floatingPoints.length-1;i>=0;i--){const fp=floatingPoints[i];fp.life++;fp.y+=fp.vy;if(fp.life>=fp.duration){floatingPoints.splice(i,1)}}}
@@ -653,10 +677,8 @@ function updateStaticBubbleSparks() {
             staticBubbleSparks.splice(i, 1);
         }
     }
-
     const allBubbles = grid.flat();
     if(playerBubble && !isFiring) allBubbles.push(playerBubble);
-
     allBubbles.forEach(bubble => {
         if (bubble && bubble.type === SPECIALS.STATIC) {
             if (Math.random() < 0.4) {
@@ -674,9 +696,33 @@ function updateStaticBubbleSparks() {
         }
     });
 }
+function updateGlitterParticles() {
+    if (level !== 4) {
+        if (glitterParticles.length > 0) glitterParticles = [];
+        return;
+    }
+    grid.flat().forEach(bubble => {
+        if (bubble && Math.random() < 0.1) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = bubble.radius || BUBBLE_RADIUS;
+            glitterParticles.push({
+                x: bubble.x + Math.cos(angle) * radius * 0.8, y: bubble.y + Math.sin(angle) * radius * 0.8,
+                vx: (Math.random() - 0.5) * 0.5, vy: (Math.random() - 0.5) * 0.5,
+                life: 0, duration: 20 + Math.random() * 20,
+                color: ['#FFFFFF', '#E6E6FA', '#FFD700'][Math.floor(Math.random() * 3)],
+                size: Math.random() * 1.5 + 1
+            });
+        }
+    });
+    for (let i = glitterParticles.length - 1; i >= 0; i--) {
+        const p = glitterParticles[i];
+        p.life++; p.x += p.vx; p.y += p.vy;
+        if (p.life >= p.duration) glitterParticles.splice(i, 1);
+    }
+}
 
 function update() {
-    updatePopAnimations(); updateFloatingPoints(); updateBombSparks(); updateShockwaves(); updateStaticBubbleSparks();
+    updatePopAnimations(); updateFloatingPoints(); updateBombSparks(); updateShockwaves(); updateStaticBubbleSparks(); updateGlitterParticles();
     if (screenShake.duration > 0) {
         screenShake.duration--;
         const sx = (Math.random() - 0.5) * screenShake.magnitude;
@@ -698,7 +744,7 @@ function update() {
 
     rainbowGradientOffset = (rainbowGradientOffset + 0.005) % 1;
     if(isFiring){playerBubble.x+=playerBubble.vx;playerBubble.y+=playerBubble.vy;if(playerBubble.x-BUBBLE_RADIUS<0||playerBubble.x+BUBBLE_RADIUS>canvas.width)playerBubble.vx*=-1;if(playerBubble.y-BUBBLE_RADIUS<0){snapBubble(null);return}for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(grid[r][c] && Math.hypot(playerBubble.x-grid[r][c].x,playerBubble.y-grid[r][c].y)<BUBBLE_RADIUS*2){snapBubble({r,c});return}}
-    rowDropTimer++; if(rowDropTimer >= LEVEL_ROW_DROP_SPEEDS[level]){ addNewRow(); }
+    rowDropTimer++; if(rowDropTimer >= (LEVEL_ROW_DROP_SPEEDS[level] || 8 * 60)){ addNewRow(); addNewRow(); }
     bombTimer++; if(bombTimer >= BOMB_INTERVAL) { spawnBombBubble(); }
 }
 
@@ -768,26 +814,35 @@ async function handlePostSnap(row, col) {
         }
     }
     
-    const coordsToCheck = Array.from(coordsToPop);
-    for (const coordStr of coordsToCheck) {
+    const staticBubblesToPop = [];
+    coordsToPop.forEach(coordStr => {
         const [r, c] = coordStr.split(',').map(Number);
         const bubble = grid[r]?.[c];
-        if(!bubble) continue;
-        if(bubble.type === SPECIALS.STATIC) {
-            playSound('magical', { gain: 0.5, playbackRate: 1.2 });
+        if (bubble && bubble.type === SPECIALS.STATIC) {
+            staticBubblesToPop.push(bubble);
+        }
+    });
+    if (staticBubblesToPop.length > 0) {
+        playSound('magical', { gain: 0.5, playbackRate: 1.2 });
+        staticBubblesToPop.forEach(staticBubble => {
             const candidates = [];
-            for(let r2=0; r2<ROWS; r2++) for(let c2=0; c2<COLS; c2++) {
-                if (grid[r2][c2]?.color === bubble.color && !coordsToPop.has(`${r2},${c2}`)) { candidates.push({r: r2, c: c2}); }
+            for (let r2 = 0; r2 < ROWS; r2++) {
+                for (let c2 = 0; c2 < COLS; c2++) {
+                    const coordStr = `${r2},${c2}`;
+                    if (grid[r2][c2]?.color === staticBubble.color && !coordsToPop.has(coordStr)) {
+                         candidates.push({ r: r2, c: c2 });
+                    }
+                }
             }
-            if(candidates.length > 0) {
+            if (candidates.length > 0) {
                 const targetBubbleCoord = candidates[Math.floor(Math.random() * candidates.length)];
                 coordsToPop.add(`${targetBubbleCoord.r},${targetBubbleCoord.c}`);
                 const targetBubble = grid[targetBubbleCoord.r][targetBubbleCoord.c];
-                staticSparks.push({ fromX: bubble.x, fromY: bubble.y, toX: targetBubble.x, toY: targetBubble.y, life: 0, duration: 15 });
+                staticSparks.push({ fromX: staticBubble.x, fromY: staticBubble.y, toX: targetBubble.x, toY: targetBubble.y, life: 0, duration: 15 });
             }
-        }
+        });
     }
-    
+
     const newlyBrokenBricks = new Set();
     for (const coordStr of coordsToPop) {
         const [r, c] = coordStr.split(',').map(Number);
@@ -819,11 +874,11 @@ async function handlePostSnap(row, col) {
             const bubble = grid[r]?.[c];
             if (bubble) {
                 if (bubble.type === SPECIALS.BRICK) {
-                    brickBonus += 100;
+                    brickBonus += 75;
                 } else if (floaters.some(fb => `${fb.r},${fb.c}` === coordStr)) {
-                    dropPoints += 100;
+                    dropPoints += 50;
                 } else {
-                    totalPoints += 75;
+                    totalPoints += 50;
                 }
                 
                 if (bubble.type === 'life') lifeBubblesPopped++;
@@ -1042,6 +1097,7 @@ function gameLoop() {
     if(gameState==='playing'&&!isFiring)drawAimingLine();
     drawPopAnimations(); drawFloatingPoints(); drawBombSparks(); drawShockwaves(); drawGameOverLine();
     drawStaticSparks(); drawStaticBubbleSparks(); drawComboAnnouncer();
+    drawGlitterParticles();
     if(gameState === 'gameover') { drawFireworks(); drawRain(); }
     requestAnimationFrame(gameLoop);
 }

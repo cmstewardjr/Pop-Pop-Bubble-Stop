@@ -76,24 +76,28 @@
             margin-top: 15px;
             padding: 10px;
             box-sizing: border-box;
-            background-color: rgba(214, 232, 250, 0.65);
-            backdrop-filter: blur(4px);
-            border: 5px solid rgba(163, 193, 227, 0.7);
+            background: linear-gradient(to top, #34495e, #5c97bf);
+            border: 5px solid rgba(163, 193, 227, 0.5);
             border-radius: 10px;
             display: flex;
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
             gap: 10px;
-            color: #4a2d6b;
+            color: #f0f0f0;
             font-size: 18px;
             font-weight: bold;
             z-index: 1;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
         }
 
-        #restart-button, #audio-toggle-button {
+        #restart-button, #audio-toggle-button, #pause-button {
             padding: 5px 10px; font-size: 14px; font-weight: bold; cursor: pointer;
-            border: 2px solid #4a2d6b; background-color: white; color: #4a2d6b; border-radius: 5px;
+            border: 2px solid #f0f0f0; background-color: transparent; color: #f0f0f0; border-radius: 5px;
+            transition: background-color 0.2s ease;
+        }
+        #restart-button:hover, #audio-toggle-button:hover, #pause-button:hover {
+            background-color: rgba(255, 255, 255, 0.1);
         }
         .next-bubble-area {
             display: flex; align-items: center; gap: 8px;
@@ -105,13 +109,15 @@
             background-color: rgba(0, 0, 0, 0.5);
             backdrop-filter: blur(5px);
             color: white;
-            display: flex; 
+            display: none; /* Changed from flex */
             flex-direction: column;
             justify-content: center;
             align-items: center;
             text-align: center;
             border-radius: 5px;
             z-index: 10;
+            opacity: 0;
+            transition: opacity 0.5s ease;
         }
         .overlay-screen h2 {
             font-family: 'Fredoka One', cursive; margin-top: 0; margin-bottom: 20px;
@@ -173,18 +179,24 @@
             font-weight: bold;
             text-shadow: 1px 1px 2px #000;
         }
-
-        #game-over { display: none; }
-        #start-overlay { display: none; }
-        #level-up-overlay { display: none; }
-        #level-up-overlay p { font-size: 0.8em; margin: 10px 0 20px 0; }
+        
+        #game-over, #start-overlay, #pause-overlay, #level-up-overlay, #rules-overlay {
+             display: none; 
+        }
 
         @media (max-width: 480px) {
             h1 { font-size: 2em; }
             #ui-container { justify-content: center; font-size: 16px; gap: 8px; }
-            #restart-button, #audio-toggle-button { padding: 10px 15px; }
+            #restart-button, #audio-toggle-button, #pause-button { padding: 10px 15px; }
             #rules-panel { padding: 15px; }
             .rules-text-container { font-size: 0.9rem; }
+        }
+
+        @media (max-height: 800px) {
+            body { padding: 10px 0; }
+            h1 { font-size: 2em; margin-bottom: 5px; }
+            #game-container { max-height: 70vh; }
+            #ui-container { margin-top: 10px; font-size: 16px; }
         }
     </style>
 </head>
@@ -212,6 +224,11 @@
                 <button id="continue-button">Continue</button>
             </div>
         </div>
+        
+        <div id="pause-overlay" class="overlay-screen">
+            <h2>Paused</h2>
+            <button id="resume-button">Resume</button>
+        </div>
 
         <div id="level-up-overlay" class="overlay-screen">
             <h2 id="level-up-title">Level Up!</h2>
@@ -236,6 +253,7 @@
             <span>Next:</span>
             <canvas id="nextBubbleCanvas" width="40" height="40"></canvas>
         </div>
+        <button id="pause-button">Pause</button>
         <button id="audio-toggle-button">Sound: ON</button>
         <button id="restart-button">Restart</button>
     </div>
@@ -249,20 +267,46 @@ const scoreEl = document.getElementById('score'), levelEl = document.getElementB
 const highScoreEl = document.getElementById('high-score');
 const missCounterEl = document.getElementById('miss-counter');
 const redoIndicatorEl = document.getElementById('redo-indicator');
-const finalScoreEl = document.getElementById('finalScore'), rulesOverlay = document.getElementById('rules-overlay');
+const finalScoreEl = document.getElementById('finalScore');
+const rulesOverlay = document.getElementById('rules-overlay');
 const startOverlay = document.getElementById('start-overlay'), endMessageEl = document.getElementById('end-message');
 const levelUpOverlay = document.getElementById('level-up-overlay'), levelUpMessageEl = document.getElementById('level-up-message');
+const pauseOverlay = document.getElementById('pause-overlay');
 const audioToggleButton = document.getElementById('audio-toggle-button');
+const pauseButton = document.getElementById('pause-button');
+const resumeButton = document.getElementById('resume-button');
 
+// --- SPLASH SCREEN SYSTEM ---
+let isFirstLoad = true; // The master switch to ensure this only runs once per session.
+
+// Splash screen timing and state variables (converted to frame counts for our loop)
+const SPLASH_FADE_FRAMES = 90;  // Approx 1.5 seconds at 60fps
+const SPLASH_HOLD_FRAMES = 120; // Approx 2.0 seconds at 60fps
+let splashPhase = 'fade-in';
+let splashTimer = 0;
+let splashOpacity = 0;
+
+// Image loader for the splash screen
+const splashImage = new Image();
+let splashImageLoaded = false;
+splashImage.src = 'https://nerdrealm419.github.io/Go-Go-Monkey-Go-v1/splash-screen.png';
+splashImage.onload = () => {
+    splashImageLoaded = true;
+};
+// --- END SPLASH SCREEN SYSTEM ---
+
+// --- ALL GAME LOGIC AND VARIABLES (UNCHANGED) ---
+// (The large block of game logic functions goes here, exactly as it was originally)
 const COLS = 12, ROWS = 14, SHOTS_UNTIL_LOSS = 5;
 const BOMB_INTERVAL = 25 * 60;
-const LEVEL_ROW_DROP_SPEEDS = { 1: 12 * 60, 2: 12 * 60, 3: 12 * 60, 4: 12 * 60 };
+const LEVEL_ROW_DROP_SPEEDS = { 1: 15 * 60, 2: 15 * 60, 3: 15 * 60, 4: 15 * 60 };
 const FLOATING_POINTS_DURATION = 50, POP_PARTICLE_COUNT = 8, POP_PARTICLE_DURATION = 60;
 const PADDING = 5;
 const BUBBLE_RADIUS = (canvas.width - PADDING * 2) / (COLS * 2 + 1);
 const HEX_WIDTH = BUBBLE_RADIUS * 2, HEX_HEIGHT = Math.sqrt(3) * BUBBLE_RADIUS;
 const offsetX = PADDING + BUBBLE_RADIUS, offsetY = PADDING + BUBBLE_RADIUS;
 const GAME_OVER_LINE_Y = canvas.height - BUBBLE_RADIUS * 4;
+const COLLISION_RADIUS = BUBBLE_RADIUS * 1.9;
 
 const ALL_COLORS = {
     1: ['#FF5733', '#33FF57', '#3357FF', '#FF33A1', '#A133FF', '#FFFF33'],
@@ -308,7 +352,7 @@ function playSound(name, options = {}) {
     source.start(0);
 }
 function playLoopingSound(name, options = {}) {
-    if (isMuted || !audioContext || !sounds[name]) return null;
+    if (isMuted || !audioContext || !sounds[name] || (name === 'sizzle' && sizzleSoundSource) || (name === 'rainbow' && rainbowSoundSource)) return null;
     const source = audioContext.createBufferSource();
     source.buffer = sounds[name];
     source.loop = true;
@@ -349,12 +393,21 @@ let grid, playerBubble, nextBubble, score, highScore, shotsFired, rowDropTimer, 
 let gridRowOffset = 0;
 let isFiring = false, aim = { x: canvas.width / 2, y: 0 };
 let popAnimations = [], floatingPoints = [], fireworks = [], rain = [], bombSparks = [], shockwaves = [];
-let gameState = 'rules';
+let gameState = 'intro'; // <-- Default state
 let backgroundBubbles = [];
 let level, currentColors, rainbowGradientOffset;
 let screenShake = { magnitude: 0, duration: 0 };
 let comboAnnouncer = { text: '', life: 0, x: 0, y: 0 };
 let staticSparks = [], staticBubbleSparks = [], glitterParticles = [];
+let trajectory = { path: [], snapPoint: null };
+// --- State object for the canvas-based intro ---
+let introState = {
+    text: '',
+    scale: 0,
+    opacity: 0,
+    shakeDuration: 0,
+    shakeMagnitude: 6
+};
 
 function updateLevelStyles(newLevel) {
     if (gameContainer && LEVEL_BACKGROUNDS[newLevel]) {
@@ -404,16 +457,13 @@ function resetForNextLevel() {
     popAnimations = []; floatingPoints = []; fireworks = []; rain = []; bombSparks = []; shockwaves = []; staticSparks = []; staticBubbleSparks = []; glitterParticles = [];
     gridRowOffset = 0;
 
-    const initialPaletteSize = Math.min(currentColors.length, 4);
-    const initialColorPalette = currentColors.slice(0, initialPaletteSize);
-
     for (let r = 0; r < 4; r++) {
         for (let c = 0; c < COLS; c++) {
             const rand = Math.random();
             if (rand < 0.08) {
                 grid[r][c] = createBubble(r, c, null, SPECIALS.BRICK);
             } else {
-                const randomColor = initialColorPalette[Math.floor(Math.random() * initialColorPalette.length)];
+                const randomColor = currentColors[Math.floor(Math.random() * currentColors.length)];
                 grid[r][c] = createBubble(r, c, randomColor);
             }
         }
@@ -462,7 +512,6 @@ function init() {
     rainbowGradientOffset = 0;
     gridRowOffset = 0;
     resetForNextLevel();
-    gameState = 'pregame';
     updateUI();
 }
 function updateUI() { 
@@ -472,21 +521,23 @@ function updateUI() {
     missCounterEl.innerText = shotsFired; 
     redoIndicatorEl.style.display = (shotsFired === 4 && playerBubble && playerBubble.type === SPECIALS.PAINT) ? 'block' : 'none';
     nextCtx.clearRect(0,0,nextBubbleCanvas.width,nextBubbleCanvas.height); 
-    drawBubble(nextCtx,{...nextBubble,x:nextBubbleCanvas.width/2,y:nextBubbleCanvas.height/2,radius:BUBBLE_RADIUS*0.8});
+    if (nextBubble) {
+        drawBubble(nextCtx,{...nextBubble,x:nextBubbleCanvas.width/2,y:nextBubbleCanvas.height/2,radius:BUBBLE_RADIUS*0.8});
+    }
 }
 
-function draw3DSphere(context, x, y, radius, baseStyle) {
+function draw3DSphere(context, x, y, radius, baseStyle, alpha = 1.0) {
     const opacity = (level > 1) ? 0.80 : 0.65;
-    if (typeof baseStyle === 'string') { context.fillStyle = hexToRgba(baseStyle, opacity); } else { context.fillStyle = baseStyle; }
+    if (typeof baseStyle === 'string') { context.fillStyle = hexToRgba(baseStyle, opacity * alpha); } else { context.fillStyle = baseStyle; }
     context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2); context.fill();
     let glowGrad = context.createRadialGradient(x, y, 0, x, y, radius);
-    glowGrad.addColorStop(0, 'rgba(255, 255, 255, 0.2)'); glowGrad.addColorStop(0.8, 'rgba(255, 255, 255, 0)');
+    glowGrad.addColorStop(0, `rgba(255, 255, 255, ${0.2 * alpha})`); glowGrad.addColorStop(0.8, 'rgba(255, 255, 255, 0)');
     context.fillStyle = glowGrad; context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2); context.fill();
     let shadowGrad = context.createRadialGradient(x + radius * 0.4, y + radius * 0.5, radius * 0.5, x, y, radius * 1.5);
-    shadowGrad.addColorStop(0, 'rgba(0,0,0,0.3)'); shadowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    shadowGrad.addColorStop(0, `rgba(0,0,0,${0.3 * alpha})`); shadowGrad.addColorStop(1, 'rgba(0,0,0,0)');
     context.fillStyle = shadowGrad; context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2); context.fill();
     let highlightGrad = context.createRadialGradient(x - radius * 0.4, y - radius * 0.5, 0, x - radius * 0.4, y - radius * 0.5, radius * 0.6);
-    highlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.8)'); highlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    highlightGrad.addColorStop(0, `rgba(255, 255, 255, ${0.8 * alpha})`); highlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
     context.fillStyle = highlightGrad; context.beginPath(); context.arc(x - radius * 0.4, y - radius * 0.5, radius * 0.6, 0, Math.PI * 2); context.fill();
 }
 function drawJaggedLine(ctx, x1, y1, x2, y2, segments, jaggedness) {
@@ -502,21 +553,22 @@ function drawJaggedLine(ctx, x1, y1, x2, y2, segments, jaggedness) {
     ctx.lineTo(x2, y2);
     ctx.stroke();
 }
-function drawBubble(context, bubble) {
+function drawBubble(context, bubble, alpha = 1.0) {
     if (!bubble) return;
     const radius = bubble.radius || BUBBLE_RADIUS;
     const wobbleY = bubble.wobble > 0 ? Math.sin(bubble.wobble * Math.PI * 4) * bubble.wobble * 2 : 0;
     const x = bubble.x, y = bubble.y + wobbleY;
 
     if (bubble.type !== SPECIALS.BRICK) {
-        draw3DSphere(context, x, y, radius, bubble.color);
+        draw3DSphere(context, x, y, radius, bubble.color, alpha);
     }
 
     ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     switch (bubble.type) {
         case SPECIALS.LIFE:
-            draw3DSphere(context, x, y, radius, '#FFFFFF');
+            draw3DSphere(context, x, y, radius, '#FFFFFF', alpha);
             ctx.strokeStyle = '#D00000'; ctx.lineWidth = 4; const plusSize = radius * 0.5; ctx.beginPath();
             ctx.moveTo(x, y - plusSize); ctx.lineTo(x, y + plusSize);
             ctx.moveTo(x - plusSize, y); ctx.lineTo(x + plusSize, y);
@@ -537,15 +589,13 @@ function drawBubble(context, bubble) {
             for (let i = 0; i <= numColors * 2; i++) {
                 const colorIndex = i % numColors; let position = (i / numColors + rainbowGradientOffset) % 1; rainbowGrad.addColorStop(position, colors[colorIndex]);
             }
-            draw3DSphere(context, x, y, radius, rainbowGrad);
+            draw3DSphere(context, x, y, radius, rainbowGrad, alpha);
             break;
         case SPECIALS.BRICK:
             ctx.save();
             ctx.beginPath();
             ctx.arc(x, y, radius, 0, Math.PI * 2);
-            ctx.clip(); // Clip to the circle shape
-
-            // Draw the brick texture
+            ctx.clip(); 
             ctx.fillStyle = '#4a2d1a'; 
             ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
             ctx.strokeStyle = '#b0b0b0'; 
@@ -563,29 +613,19 @@ function drawBubble(context, bubble) {
                     ctx.strokeRect(colX - brickWidth/2, rowY - brickHeight/2, brickWidth, brickHeight);
                 }
             }
-
-            // Draw the bubble shine on top
             let brickShadowGrad = context.createRadialGradient(x + radius * 0.4, y + radius * 0.5, radius * 0.5, x, y, radius * 1.5);
             brickShadowGrad.addColorStop(0, 'rgba(0,0,0,0.4)'); brickShadowGrad.addColorStop(1, 'rgba(0,0,0,0)');
             context.fillStyle = brickShadowGrad;
             context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-
             let brickHighlightGrad = context.createRadialGradient(x - radius * 0.4, y - radius * 0.5, 0, x - radius * 0.4, y - radius * 0.5, radius * 0.6);
             brickHighlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.5)'); brickHighlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
             context.fillStyle = brickHighlightGrad;
             context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-
-            ctx.restore(); // Restore from clipping
-            
-            // Draw crack if health is low
+            ctx.restore();
             if (bubble.health <= 1) {
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(x - radius * 0.6, y - radius * 0.5);
-                ctx.lineTo(x - radius * 0.2, y - radius * 0.2);
-                ctx.lineTo(x, y + radius * 0.1);
-                ctx.lineTo(x + radius * 0.3, y - radius * 0.3);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)'; ctx.lineWidth = 2; ctx.beginPath();
+                ctx.moveTo(x - radius * 0.6, y - radius * 0.5); ctx.lineTo(x - radius * 0.2, y - radius * 0.2);
+                ctx.lineTo(x, y + radius * 0.1); ctx.lineTo(x + radius * 0.3, y - radius * 0.3);
                 ctx.lineTo(x + radius * 0.7, y + radius * 0.6);
                 ctx.stroke();
             }
@@ -602,10 +642,56 @@ function drawBubble(context, bubble) {
     ctx.restore();
 }
 
-function drawGrid() { for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(grid[r][c])drawBubble(ctx,grid[r][c]);}
-function drawPopAnimations() { popAnimations.forEach(p=>{ const progress = p.life / p.duration; const alpha = 1 - progress; const currentSize = p.size * (1 - progress * 0.5); if (currentSize <= 0) return; let grad = ctx.createRadialGradient(p.x - currentSize * 0.3, p.y - currentSize * 0.3, 0, p.x, p.y, currentSize); const particleColor = p.color || '#cccccc'; const darkParticleColor = darkenColor(particleColor, 0.5); grad.addColorStop(0, hexToRgba('white', alpha * 0.8)); grad.addColorStop(0.5, hexToRgba(particleColor, alpha)); grad.addColorStop(1, hexToRgba(darkParticleColor, alpha)); ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(p.x, p.y, currentSize, 0, Math.PI * 2); ctx.fill(); });}
+function drawGrid() { if(!grid) return; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(grid[r][c])drawBubble(ctx,grid[r][c]);}
+function drawPopAnimations() {
+    popAnimations.forEach(p => {
+        const progress = p.life / p.duration;
+        const alpha = 1 - progress;
+        const currentSize = p.size * (1 - progress * 0.5);
+        if (currentSize <= 0) return;
+
+        if (p.isSimple) {
+            // Fast, simple drawing for intro text pops
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.8})`;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, currentSize, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            // Original, more expensive drawing for game bubbles
+            let grad = ctx.createRadialGradient(p.x - currentSize * 0.3, p.y - currentSize * 0.3, 0, p.x, p.y, currentSize);
+            const particleColor = p.color || '#cccccc';
+            const darkParticleColor = darkenColor(particleColor, 0.5);
+            grad.addColorStop(0, hexToRgba('white', alpha * 0.8));
+            grad.addColorStop(0.5, hexToRgba(particleColor, alpha));
+            grad.addColorStop(1, hexToRgba(darkParticleColor, alpha));
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, currentSize, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    });
+}
 function drawFloatingPoints() { ctx.font="bold 24px 'Fredoka One',cursive";ctx.textAlign='center';ctx.textBaseline='middle';floatingPoints.forEach(fp=>{const p=fp.life/fp.duration;const alpha=1-p*p;ctx.fillStyle=`rgba(255,255,255,${alpha})`;ctx.strokeStyle=`rgba(60,60,60,${alpha*0.8})`;ctx.lineWidth=4;ctx.strokeText(fp.text,fp.x,fp.y);ctx.fillText(fp.text,fp.x,fp.y)});ctx.lineWidth=1;}
-function drawAimingLine() { if(aim.y>playerBubble.y-20)return;const angle=Math.atan2(aim.y-playerBubble.y,aim.x-playerBubble.x);ctx.beginPath();ctx.moveTo(playerBubble.x,playerBubble.y);ctx.lineTo(playerBubble.x+Math.cos(angle)*1e3,playerBubble.y+Math.sin(angle)*1e3);ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.setLineDash([5,10]);ctx.lineWidth=3;ctx.stroke();ctx.setLineDash([]);}
+function drawAimingLine() { 
+    if(gameState!=='playing'||!playerBubble||aim.y>playerBubble.y-20) return;
+    if(!trajectory.path || trajectory.path.length === 0) return;
+    
+    ctx.setLineDash([5, 10]);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.beginPath();
+    ctx.moveTo(trajectory.path[0].x, trajectory.path[0].y);
+    for(let i = 1; i < trajectory.path.length; i++) {
+        ctx.lineTo(trajectory.path[i].x, trajectory.path[i].y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    
+    if(trajectory.snapPoint) {
+        let ghostBubble = {...playerBubble, x: trajectory.snapPoint.x, y: trajectory.snapPoint.y, radius: BUBBLE_RADIUS};
+        drawBubble(ctx, ghostBubble, 0.5);
+    }
+}
 function drawGameOverLine() { ctx.beginPath();ctx.moveTo(0,GAME_OVER_LINE_Y);ctx.lineTo(canvas.width,GAME_OVER_LINE_Y);ctx.strokeStyle='rgba(255,0,0,0.7)';ctx.lineWidth=3;ctx.setLineDash([10,5]);ctx.stroke();ctx.setLineDash([]);}
 function drawFireworks() { fireworks.forEach(p=>{ctx.beginPath();ctx.fillStyle=p.color;ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill()});}
 function drawRain() { ctx.strokeStyle='rgba(174,194,224,0.5)'; ctx.lineWidth=2; rain.forEach(p=>{ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x,p.y+p.len);ctx.stroke()}); ctx.lineWidth=1;}
@@ -650,7 +736,7 @@ function drawStaticBubbleSparks() {
     ctx.restore();
 }
 function drawGlitterParticles() {
-    if (level !== 4) return;
+    if (!grid || level !== 4) return;
     ctx.save();
     glitterParticles.forEach(p => {
         const progress = p.life / p.duration;
@@ -697,7 +783,7 @@ function updateStaticBubbleSparks() {
     });
 }
 function updateGlitterParticles() {
-    if (level !== 4) {
+    if (!grid || level !== 4) {
         if (glitterParticles.length > 0) glitterParticles = [];
         return;
     }
@@ -743,19 +829,20 @@ function update() {
     });
 
     rainbowGradientOffset = (rainbowGradientOffset + 0.005) % 1;
-    if(isFiring){playerBubble.x+=playerBubble.vx;playerBubble.y+=playerBubble.vy;if(playerBubble.x-BUBBLE_RADIUS<0||playerBubble.x+BUBBLE_RADIUS>canvas.width)playerBubble.vx*=-1;if(playerBubble.y-BUBBLE_RADIUS<0){snapBubble(null);return}for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(grid[r][c] && Math.hypot(playerBubble.x-grid[r][c].x,playerBubble.y-grid[r][c].y)<BUBBLE_RADIUS*2){snapBubble({r,c});return}}
+    if(isFiring && playerBubble){playerBubble.x+=playerBubble.vx;playerBubble.y+=playerBubble.vy;if(playerBubble.x-BUBBLE_RADIUS<0||playerBubble.x+BUBBLE_RADIUS>canvas.width)playerBubble.vx*=-1;if(playerBubble.y-BUBBLE_RADIUS<0){snapBubble(null);return}for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(grid[r][c] && Math.hypot(playerBubble.x-grid[r][c].x,playerBubble.y-grid[r][c].y)<COLLISION_RADIUS){snapBubble({r,c});return}}
     rowDropTimer++; if(rowDropTimer >= (LEVEL_ROW_DROP_SPEEDS[level] || 8 * 60)){ addNewRow(); addNewRow(); }
     bombTimer++; if(bombTimer >= BOMB_INTERVAL) { spawnBombBubble(); }
+    if (gameState === 'playing' && !isFiring) trajectory = calculateTrajectory();
 }
 
 async function snapBubble(collidedCoords) { 
     sizzleSoundSource = stopLoopingSound(sizzleSoundSource); rainbowSoundSource = stopLoopingSound(rainbowSoundSource);
-    isFiring=false; playerBubble.vx=0; playerBubble.vy=0;
+    isFiring=false; if(playerBubble){playerBubble.vx=0; playerBubble.vy=0;}
     let s=null; 
     if(collidedCoords===null){let d=Infinity;for(let c=0;c<COLS;c++)if(!grid[0][c]){const D=Math.abs(playerBubble.x-(offsetX+c*HEX_WIDTH+((0+gridRowOffset)%2)*BUBBLE_RADIUS));if(D<d){d=D;s={r:0,c}}}} 
     else{const n=getNeighbors(collidedCoords.r,collidedCoords.c);let d=Infinity;for(const N of n)if(!grid[N.r][N.c]){const x=offsetX+N.c*HEX_WIDTH+((N.r+gridRowOffset)%2)*BUBBLE_RADIUS,y=offsetY+N.r*HEX_HEIGHT,D=Math.hypot(playerBubble.x-x,playerBubble.y-y);if(D<d){d=D;s=N}}} 
     if(s===null){let d=Infinity;for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(!grid[r][c]){const x=offsetX+c*HEX_WIDTH+((r+gridRowOffset)%2)*BUBBLE_RADIUS,y=offsetY+r*HEX_HEIGHT,D=Math.hypot(playerBubble.x-x,playerBubble.y-y);if(D<d){d=D;s={r,c}}}} 
-    if(s){
+    if(s && playerBubble){
         grid[s.r][s.c]=createBubble(s.r,s.c,playerBubble.color,playerBubble.type);
         grid[s.r][s.c].wobble = 1;
         await handlePostSnap(s.r,s.c)
@@ -763,7 +850,42 @@ async function snapBubble(collidedCoords) {
     else{prepareNextShot()}
 }
 function createFloatingPoints(text, x, y) { floatingPoints.push({text,x,y,life:0,duration:FLOATING_POINTS_DURATION,vy:-0.7});}
-function createPopEffect(x, y, color) { for(let i=0;i<POP_PARTICLE_COUNT;i++){const angle=Math.random()*Math.PI*2;const speed=Math.random()*2+1;popAnimations.push({x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,life:0,duration:POP_PARTICLE_DURATION,color:color||'#ccc',size:Math.random()*5+3});}}
+
+// --- KEY CHANGES ARE BELOW ---
+
+// Original pop effect for in-game bubbles
+function createPopEffect(x, y, color) { 
+    for(let i=0; i<POP_PARTICLE_COUNT; i++){
+        const angle=Math.random()*Math.PI*2;
+        const speed=Math.random()*2+1;
+        popAnimations.push({
+            x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,life:0,
+            duration:POP_PARTICLE_DURATION,
+            color:color||'#ccc',size:Math.random()*5+3
+        });
+    }
+}
+
+// A faster, quicker version specifically for the intro text
+function createIntroPopEffect(x, y, color) {
+    const INTRO_POP_PARTICLE_COUNT = 4; // Fewer particles for better performance
+    for (let i = 0; i < INTRO_POP_PARTICLE_COUNT; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 4 + 2; 
+        popAnimations.push({
+            x, y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 0,
+            duration: 35,
+            color: color || 'white',
+            size: Math.random() * 3 + 1.5, // Slightly smaller particles
+            isSimple: true // Flag for a faster drawing method
+        });
+    }
+}
+
+
 function triggerScreenShake(magnitude, duration) { screenShake.magnitude = magnitude; screenShake.duration = duration; }
 function triggerComboAnnouncer(text) { comboAnnouncer.text = text; comboAnnouncer.life = 60; comboAnnouncer.x = canvas.width / 2; comboAnnouncer.y = canvas.height / 2; }
 
@@ -814,8 +936,19 @@ async function handlePostSnap(row, col) {
         }
     }
     
-    const staticBubblesToPop = [];
+    const finalCoordsToPop = new Set(coordsToPop);
     coordsToPop.forEach(coordStr => {
+        const [r, c] = coordStr.split(',').map(Number);
+        getNeighbors(r, c).forEach(neighborCoord => {
+            const bubble = grid[neighborCoord.r]?.[neighborCoord.c];
+            if(bubble && bubble.type === SPECIALS.LIFE) {
+                finalCoordsToPop.add(`${neighborCoord.r},${neighborCoord.c}`);
+            }
+        });
+    });
+
+    const staticBubblesToPop = [];
+    finalCoordsToPop.forEach(coordStr => {
         const [r, c] = coordStr.split(',').map(Number);
         const bubble = grid[r]?.[c];
         if (bubble && bubble.type === SPECIALS.STATIC) {
@@ -829,14 +962,14 @@ async function handlePostSnap(row, col) {
             for (let r2 = 0; r2 < ROWS; r2++) {
                 for (let c2 = 0; c2 < COLS; c2++) {
                     const coordStr = `${r2},${c2}`;
-                    if (grid[r2][c2]?.color === staticBubble.color && !coordsToPop.has(coordStr)) {
+                    if (grid[r2][c2]?.color === staticBubble.color && !finalCoordsToPop.has(coordStr)) {
                          candidates.push({ r: r2, c: c2 });
                     }
                 }
             }
             if (candidates.length > 0) {
                 const targetBubbleCoord = candidates[Math.floor(Math.random() * candidates.length)];
-                coordsToPop.add(`${targetBubbleCoord.r},${targetBubbleCoord.c}`);
+                finalCoordsToPop.add(`${targetBubbleCoord.r},${targetBubbleCoord.c}`);
                 const targetBubble = grid[targetBubbleCoord.r][targetBubbleCoord.c];
                 staticSparks.push({ fromX: staticBubble.x, fromY: staticBubble.y, toX: targetBubble.x, toY: targetBubble.y, life: 0, duration: 15 });
             }
@@ -844,12 +977,10 @@ async function handlePostSnap(row, col) {
     }
 
     const newlyBrokenBricks = new Set();
-    for (const coordStr of coordsToPop) {
+    for (const coordStr of finalCoordsToPop) {
         const [r, c] = coordStr.split(',').map(Number);
         const poppingBubble = grid[r]?.[c];
-        if (poppingBubble && poppingBubble.type === 'bomb') {
-            continue;
-        }
+        if (poppingBubble && poppingBubble.type === 'bomb') { continue; }
         getNeighbors(r, c).forEach(n => {
             const neighbor = grid[n.r]?.[n.c];
             const neighborCoordStr = `${n.r},${n.c}`;
@@ -860,25 +991,25 @@ async function handlePostSnap(row, col) {
         });
     }
     if (newlyBrokenBricks.size > 0) playSound('crack', { gain: 0.8 });
-    newlyBrokenBricks.forEach(brickCoord => coordsToPop.add(brickCoord));
+    newlyBrokenBricks.forEach(brickCoord => finalCoordsToPop.add(brickCoord));
 
-    const floaters = findFloatingBubbles(coordsToPop);
-    floaters.forEach(coord => { coordsToPop.add(`${coord.r},${coord.c}`); });
+    const floaters = findFloatingBubbles(finalCoordsToPop);
+    floaters.forEach(coord => { finalCoordsToPop.add(`${coord.r},${coord.c}`); });
 
-    if (coordsToPop.size > 0) {
-        let comboCount = coordsToPop.size;
+    if (finalCoordsToPop.size > 0) {
+        let comboCount = finalCoordsToPop.size;
         let totalPoints = 0, dropPoints = 0, lifeBubblesPopped = 0, brickBonus = 0;
         let popCounter = 0;
-        for (const coordStr of coordsToPop) {
+        for (const coordStr of finalCoordsToPop) {
             const [r, c] = coordStr.split(',').map(Number);
             const bubble = grid[r]?.[c];
             if (bubble) {
                 if (bubble.type === SPECIALS.BRICK) {
-                    brickBonus += 75;
+                    brickBonus += 100;
                 } else if (floaters.some(fb => `${fb.r},${fb.c}` === coordStr)) {
                     dropPoints += 50;
-                } else {
-                    totalPoints += 50;
+                } else if (bubble.type !== SPECIALS.LIFE) {
+                    totalPoints += 75;
                 }
                 
                 if (bubble.type === 'life') lifeBubblesPopped++;
@@ -977,7 +1108,7 @@ function addNewRow() {
 }
 function spawnBombBubble() { nextBubble = { type: 'bomb', color: '#444' }; updateUI(); bombTimer = 0; }
 function prepareNextShot() {
-    if(gameState!=='playing')return;
+    if(gameState!=='playing' && gameState!=='pregame' && gameState!=='levelup') return;
     sizzleSoundSource = stopLoopingSound(sizzleSoundSource); rainbowSoundSource = stopLoopingSound(rainbowSoundSource);
     playerBubble={...nextBubble, x:canvas.width/2, y:canvas.height - BUBBLE_RADIUS - 5};
     if(playerBubble.type === 'bomb') { sizzleSoundSource = playLoopingSound('sizzle', { gain: 0.15 }); }
@@ -999,21 +1130,14 @@ function findMatches(startR, startC, forceColor = null) {
             const coordStr = `${neighborCoord.r},${neighborCoord.c}`;
             if (!visited.has(coordStr)) {
                 const neighborBubble = grid[neighborCoord.r]?.[neighborCoord.c];
-                if (neighborBubble && neighborBubble.type !== SPECIALS.BRICK) {
-                    if (neighborBubble.color === matchColor || neighborBubble.type === 'life') {
-                        visited.add(coordStr);
-                        toVisit.push(neighborCoord);
-                    }
+                if (neighborBubble && neighborBubble.color === matchColor && neighborBubble.type !== SPECIALS.BRICK) {
+                    visited.add(coordStr);
+                    toVisit.push(neighborCoord);
                 }
             }
         }
     }
-    const colorBubbleCount = cluster.reduce((count, coord) => {
-        const bubble = grid[coord.r][coord.c];
-        return (bubble?.type === 'normal' || bubble?.type === 'static') ? count + 1 : count;
-    }, 0);
-    if (cluster.length >= 3 && colorBubbleCount > 0) { return cluster; }
-    return [];
+    return cluster;
 }
 function findFloatingBubbles(coordsToIgnore = new Set()) {
     const anchored = new Set(), queue = [];
@@ -1029,7 +1153,7 @@ function findFloatingBubbles(coordsToIgnore = new Set()) {
         const current = queue[head++];
         for (const neighbor of getNeighbors(current.r, current.c)) {
             const neighborStr = `${neighbor.r},${neighbor.c}`;
-            if (grid[neighbor.r][neighbor.c] && !anchored.has(neighborStr) && !coordsToIgnore.has(neighborStr)) {
+            if (grid[neighbor.r]?.[neighbor.c] && !anchored.has(neighborStr) && !coordsToIgnore.has(neighborStr)) {
                 anchored.add(neighborStr);
                 queue.push(neighbor);
             }
@@ -1058,29 +1182,418 @@ function endGame(isWinner) {
     endMessageEl.innerText = message;
     if(isWinner){ playSound('win', { gain: 0.5 }); createFirework(); } 
     else { playSound('lose', { gain: 0.5 }); createRain(); }
-    finalScoreEl.innerText = score; gameOverEl.style.display='flex';
+    finalScoreEl.innerText = score; 
+    gameOverEl.style.display = 'flex';
+    setTimeout(() => gameOverEl.style.opacity = 1, 10);
 }
 function createFirework() { const x=Math.random()*canvas.width*0.8+canvas.width*0.1; const y=Math.random()*canvas.height*0.5+canvas.height*0.1; const color=`hsl(${Math.random()*360},100%,50%)`; for(let i=0;i<50;i++){const angle=Math.random()*Math.PI*2;const speed=Math.random()*3+1;fireworks.push({x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,color,size:Math.random()*2+1})}}
 function createRain() { for(let i=0;i<100;i++){rain.push({x:Math.random()*canvas.width,y:Math.random()*canvas.height,len:Math.random()*20+10,speed:Math.random()*5+2})}}
 function handleAimUpdate(clientX,clientY) {
-    if(gameState!=='playing')return; const rect=canvas.getBoundingClientRect(); aim.x=(clientX-rect.left)*(canvas.width/rect.width); aim.y=(clientY-rect.top)*(canvas.height/rect.height);
+    if(gameState!=='playing' || !playerBubble)return; 
+    const rect=canvas.getBoundingClientRect(); 
+    aim.x=(clientX-rect.left)*(canvas.width/rect.width); 
+    aim.y=(clientY-rect.top)*(canvas.height/rect.height);
     const currentAngle = Math.atan2(aim.y-playerBubble.y,aim.x-playerBubble.x); if (Math.abs(currentAngle - lastAimAngle) > 0.03) { aimClickCounter++; if (aimClickCounter % 3 === 0) { playSound('shick', { gain: 0.7 }); } lastAimAngle = currentAngle; }
 }
 function handleFire() {
-    if(gameState!=='playing'||isFiring||aim.y>playerBubble.y-20)return; playSound('shoot', { gain: 0.25 });
+    if(gameState!=='playing'||isFiring||!playerBubble||aim.y>playerBubble.y-20)return; playSound('shoot', { gain: 0.25 });
     const angle=Math.atan2(aim.y-playerBubble.y,aim.x-playerBubble.x),speed=15; playerBubble.vx=Math.cos(angle)*speed; playerBubble.vy=Math.sin(angle)*speed; isFiring=true;
 }
+function calculateTrajectory() {
+    if (!playerBubble) return { path: [], snapPoint: null };
 
-document.getElementById('continue-button').addEventListener('click',()=>{initAudio();playSound('click',{gain:0.4});rulesOverlay.style.display='none';startOverlay.style.display='flex'});
-document.getElementById('play-button').addEventListener('click',()=>{initAudio();playSound('click',{gain:0.4});startOverlay.style.display='none';gameState='playing'});
-document.getElementById('play-again-button').addEventListener('click',()=>{initAudio();playSound('click',{gain:0.4});gameOverEl.style.display='none';init();startOverlay.style.display='flex'});
-document.getElementById('restart-button').addEventListener('click',()=>{initAudio();playSound('click',{gain:0.4});if(gameState==='playing'&&confirm('Are you sure you want to restart the game?')){init();startOverlay.style.display='flex'}else if(gameState!=='playing'){init();startOverlay.style.display='flex'}});
-document.getElementById('level-up-continue-button').addEventListener('click', () => { initAudio(); playSound('click',{gain:0.4}); levelUpOverlay.style.display = 'none'; resetForNextLevel(); gameState = 'playing'; });
+    const angle = Math.atan2(aim.y - playerBubble.y, aim.x - playerBubble.x);
+    const speed = 15;
+    let ghost = { x: playerBubble.x, y: playerBubble.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed };
+    let path = [{x: ghost.x, y: ghost.y}];
+    
+    for (let i = 0; i < 100; i++) { // Max 100 steps
+        ghost.x += ghost.vx;
+        ghost.y += ghost.vy;
+
+        if (ghost.x - BUBBLE_RADIUS < 0 || ghost.x + BUBBLE_RADIUS > canvas.width) {
+            ghost.vx *= -1;
+            path.push({x: ghost.x, y: ghost.y});
+        }
+        if (ghost.y - BUBBLE_RADIUS < 0) {
+            let d = Infinity, snapCoords = null;
+            for(let c = 0; c < COLS; c++) {
+                if(!grid[0][c]) {
+                    const dist = Math.abs(ghost.x - (offsetX + c * HEX_WIDTH + ((0 + gridRowOffset) % 2) * BUBBLE_RADIUS));
+                    if(dist < d) { d = dist; snapCoords = {r:0, c}; }
+                }
+            }
+             if (snapCoords) {
+                return { path, snapPoint: { x: offsetX + snapCoords.c * HEX_WIDTH + ((snapCoords.r + gridRowOffset) % 2) * BUBBLE_RADIUS, y: offsetY + snapCoords.r * HEX_HEIGHT } };
+            }
+            return { path, snapPoint: null };
+        }
+
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                if (grid[r][c] && Math.hypot(ghost.x - grid[r][c].x, ghost.y - grid[r][c].y) < COLLISION_RADIUS) {
+                    let d = Infinity, snapCoords = null;
+                    const neighbors = getNeighbors(r, c);
+                    for (const n of neighbors) {
+                        if (!grid[n.r][n.c]) {
+                            const nx = offsetX + n.c * HEX_WIDTH + ((n.r + gridRowOffset) % 2) * BUBBLE_RADIUS;
+                            const ny = offsetY + n.r * HEX_HEIGHT;
+                            const dist = Math.hypot(ghost.x - nx, ghost.y - ny);
+                            if (dist < d) { d = dist; snapCoords = n; }
+                        }
+                    }
+                    if (snapCoords) {
+                         return { path, snapPoint: { x: offsetX + snapCoords.c * HEX_WIDTH + ((snapCoords.r + gridRowOffset) % 2) * BUBBLE_RADIUS, y: offsetY + snapCoords.r * HEX_HEIGHT } };
+                    }
+                    return { path, snapPoint: null };
+                }
+            }
+        }
+    }
+    return { path, snapPoint: null };
+}
+
+const delay = ms => new Promise(res => setTimeout(res, ms));
+const offscreenCanvas = document.createElement('canvas');
+const offscreenCtx = offscreenCanvas.getContext('2d');
+
+function createPopEffectForText(text, text2 = '', yOffset = 0) {
+    playSound('pop', { gain: 0.6, playbackRate: 1.2 });
+    const FONT_SIZE = 100;
+    
+    // Configure the invisible, off-screen canvas
+    offscreenCanvas.width = canvas.width;
+    offscreenCanvas.height = canvas.height;
+    offscreenCtx.font = `bold ${FONT_SIZE}px 'Fredoka One', cursive`;
+    
+    // Calculate measurements using the off-screen context
+    const metrics1 = offscreenCtx.measureText(text);
+    const metrics2 = text2 ? offscreenCtx.measureText(text2) : { width: 0, actualBoundingBoxAscent: 0, actualBoundingBoxDescent: 0 };
+    const totalWidth = Math.max(metrics1.width, metrics2.width);
+    const textHeight = metrics1.actualBoundingBoxAscent + metrics1.actualBoundingBoxDescent;
+    const totalHeight = text2 ? textHeight * 2.2 : textHeight;
+    const startX = (canvas.width / 2) - (totalWidth / 2);
+    const startY = (canvas.height / 2) - (totalHeight / 2) + yOffset;
+
+    // Draw the text to the INVISIBLE off-screen canvas to get pixel data
+    offscreenCtx.fillStyle = "white";
+    offscreenCtx.textBaseline = 'alphabetic';
+    
+    const text1X = (canvas.width / 2) - (metrics1.width / 2);
+    offscreenCtx.fillText(text, text1X, startY + textHeight);
+    
+    if(text2) {
+      const text2X = (canvas.width / 2) - (metrics2.width / 2);
+      offscreenCtx.fillText(text2, text2X, startY + textHeight * 2.2);
+    }
+    
+    // Sample the pixels from the INVISIBLE off-screen canvas
+    const sampleAreaX = startX - 10;
+    const sampleAreaY = startY;
+    const sampleAreaWidth = totalWidth + 20;
+    const sampleAreaHeight = totalHeight + 10;
+    const imageData = offscreenCtx.getImageData(sampleAreaX, sampleAreaY, sampleAreaWidth, sampleAreaHeight);
+    const sampleDensity = 8;
+    for(let y = 0; y < imageData.height; y += sampleDensity) {
+        for (let x = 0; x < imageData.width; x += sampleDensity) {
+            const alpha = imageData.data[(y * imageData.width + x) * 4 + 3];
+            if (alpha > 128) {
+                createIntroPopEffect(sampleAreaX + x, sampleAreaY + y, 'white');
+            }
+        }
+    }
+}
+
+// Animate values for the intro text, now with a start and end scale
+function animateIntroValue(startScale, endScale, duration) {
+    return new Promise(resolve => {
+        let start = null;
+        const scaleRange = endScale - startScale;
+        const step = (timestamp) => {
+            if (!start) start = timestamp;
+            const progress = Math.min((timestamp - start) / duration, 1);
+            
+            introState.scale = startScale + scaleRange * progress;
+            introState.opacity = progress;
+
+            if (progress < 1) {
+                window.requestAnimationFrame(step);
+            } else {
+                introState.scale = endScale;
+                introState.opacity = 1;
+                resolve();
+            }
+        };
+        window.requestAnimationFrame(step);
+    });
+}
+
+async function startIntro() {
+    // --- First "Pop!" ---
+    introState.text = 'Pop!';
+    await animateIntroValue(0.03, 1, 600); // Animate text into view
+    await delay(1500); // Hold the text on screen
+    // POP IT:
+    introState.opacity = 0; // Make the text instantly invisible
+    createPopEffectForText(introState.text, '', -20); // Create the particles immediately
+    await delay(1000); // Wait for particles to animate
+
+    // --- Second "Pop!" ---
+    introState.text = 'Pop!';
+    await animateIntroValue(0.03, 1, 600); // Animate text back into view
+    await delay(1500); // Hold it
+    // POP IT:
+    introState.opacity = 0; // Instantly invisible
+    createPopEffectForText(introState.text, '', -20);
+    await delay(1000);
+
+    // --- "Bubble Stop!" ---
+    introState.text = 'Bubble'; // This will draw "Bubble" and "Stop!"
+    await animateIntroValue(0.03, 1, 800);
+    await delay(1200);
+
+    // Shake it
+    introState.shakeDuration = 25;
+    await delay(450);
+    introState.shakeDuration = 0;
+    await delay(200);
+
+    // Final Pop
+    introState.opacity = 0; // Instantly invisible
+    createPopEffectForText('Bubble', 'Stop!');
+    await delay(1500); // Give the final pop effect more time to finish
+
+    // Transition to rules screen
+    rulesOverlay.style.display = 'flex';
+    await delay(50);
+    rulesOverlay.style.opacity = 1;
+    gameState = 'rules';
+}
+
+function drawIntroAnimation() {
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    let shakeX = 0; let shakeY = 0;
+    if (introState.shakeDuration > 0) {
+        introState.shakeDuration--;
+        shakeX = (Math.random() - 0.5) * introState.shakeMagnitude;
+        shakeY = (Math.random() - 0.5) * introState.shakeMagnitude;
+    }
+    
+    const FONT_SIZE = 100;
+    ctx.font = `bold ${FONT_SIZE}px 'Fredoka One', cursive`;
+    ctx.fillStyle = `rgba(255, 255, 255, ${introState.opacity})`;
+    ctx.shadowColor = "rgba(0,0,0,0.4)";
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetX = 5;
+    ctx.shadowOffsetY = 5;
+
+    const centerX = canvas.width / 2 + shakeX;
+    const centerY = canvas.height / 2 + shakeY;
+
+    ctx.translate(centerX, centerY);
+    ctx.scale(introState.scale, introState.scale);
+    ctx.translate(-centerX, -centerY);
+
+    if (introState.text === 'Bubble') {
+        ctx.fillText('Bubble', centerX, centerY - 55);
+        ctx.fillText('Stop!', centerX, centerY + 55);
+    } else {
+        ctx.fillText(introState.text, centerX, centerY-20);
+    }
+    
+    ctx.restore();
+}
+// This function updates the splash screen's animation state (opacity, phase) over time.
+function updateSplashScreen() {
+    splashTimer++;
+    switch (splashPhase) {
+        case 'fade-in':
+            splashOpacity = Math.min(1.0, splashTimer / SPLASH_FADE_FRAMES);
+            if (splashTimer >= SPLASH_FADE_FRAMES) {
+                splashPhase = 'hold';
+                splashTimer = 0; // Reset timer for the next phase
+            }
+            break;
+        case 'hold':
+            if (splashTimer >= SPLASH_HOLD_FRAMES) {
+                splashPhase = 'fade-out';
+                splashTimer = 0; // Reset timer for the next phase
+            }
+            break;
+        case 'fade-out':
+            splashOpacity = Math.max(0.0, 1.0 - (splashTimer / SPLASH_FADE_FRAMES));
+            if (splashTimer >= SPLASH_FADE_FRAMES) {
+                isFirstLoad = false; // The flag is flipped here!
+                gameState = 'intro'; // Transition to the text intro
+                startIntro(); // Kick off the text intro's animation sequence
+            }
+            break;
+    }
+}
+
+// This function draws the splash screen image onto the canvas.
+function renderSplashScreen() {
+    // Draw a black background
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (splashImageLoaded) {
+        ctx.globalAlpha = splashOpacity;
+        const imgW = splashImage.width;
+        const imgH = splashImage.height;
+        const aspect = imgW / imgH;
+        let drawW = canvas.width * 0.9;
+        let drawH = drawW / aspect;
+        if (drawH > canvas.height * 0.9) {
+            drawH = canvas.height * 0.9;
+            drawW = drawH * aspect;
+        }
+        ctx.drawImage(splashImage, (canvas.width - drawW) / 2, (canvas.height - drawH) / 2, drawW, drawH);
+        ctx.globalAlpha = 1.0; // Reset global alpha
+    }
+}
+
+function runGame() {
+    initBackground();
+    // Only display high score initially.
+    highScore = parseInt(localStorage.getItem('bubblePopHighScore')) || 0;
+    highScoreEl.innerText = highScore;
+
+    // Check if this is the first time loading.
+    if (isFirstLoad) {
+        gameState = 'splash'; // Start with the splash screen.
+    } else {
+        // If not the first load (i.e., a restart), skip intros and go to the play button.
+        gameState = 'pregame';
+        startOverlay.style.display = 'flex';
+        setTimeout(() => startOverlay.style.opacity = 1, 20);
+    }
+    
+    // Start the main game loop, which will now handle the current gameState.
+    gameLoop();
+}
+
+document.getElementById('continue-button').addEventListener('click', async () => {
+    await initAudio(); 
+    playSound('click',{gain:0.4}); 
+    
+    // Fade out rules screen
+    rulesOverlay.style.opacity = 0;
+    await delay(500); // Wait for the CSS transition
+    rulesOverlay.style.display = 'none';
+    
+    // Fade in start screen
+    startOverlay.style.opacity = 0;
+    startOverlay.style.display = 'flex';
+    await delay(20);
+    startOverlay.style.opacity = 1;
+
+    gameState = 'pregame';
+});
+
+document.getElementById('play-button').addEventListener('click', async ()=>{
+    playSound('click',{gain:0.4});
+    startOverlay.style.opacity = 0;
+    await delay(500);
+    startOverlay.style.display='none';
+    init(); // init() is called here to set up the game board.
+    gameState='playing';
+});
+
+document.getElementById('play-again-button').addEventListener('click', async ()=>{
+    playSound('click',{gain:0.4});
+    gameOverEl.style.opacity = 0;
+    await delay(500);
+    gameOverEl.style.display='none';
+    init(); 
+    startOverlay.style.opacity = 0;
+    startOverlay.style.display='flex';
+    await delay(20);
+    startOverlay.style.opacity = 1;
+    gameState = 'pregame';
+});
+
+document.getElementById('restart-button').addEventListener('click', async ()=>{
+    playSound('click',{gain:0.4});
+    if(gameState==='playing'&&confirm('Are you sure you want to restart the game?')){
+        init(); 
+        if (gameState === 'paused') {
+            pauseOverlay.style.opacity = 0;
+            await delay(500);
+            pauseOverlay.style.display = 'none';
+        }
+        startOverlay.style.opacity = 0;
+        startOverlay.style.display='flex';
+        await delay(20);
+        startOverlay.style.opacity = 1;
+        gameState='pregame';
+    } else if(gameState!=='playing' && gameState!=='rules' && gameState!=='intro'){
+        init(); 
+        if (gameOverEl.style.display === 'flex') {
+            gameOverEl.style.opacity = 0;
+            await delay(500);
+            gameOverEl.style.display = 'none';
+        }
+        if (pauseOverlay.style.display === 'flex') {
+            pauseOverlay.style.opacity = 0;
+            await delay(500);
+            pauseOverlay.style.display = 'none';
+        }
+        startOverlay.style.opacity = 0;
+        startOverlay.style.display='flex';
+        await delay(20);
+        startOverlay.style.opacity = 1;
+        gameState='pregame';
+    }
+});
+
+document.getElementById('level-up-continue-button').addEventListener('click', async () => { 
+    playSound('click',{gain:0.4}); 
+    levelUpOverlay.style.opacity = 0;
+    await delay(500);
+    levelUpOverlay.style.display = 'none'; 
+    resetForNextLevel(); 
+    gameState = 'playing'; 
+});
+
 audioToggleButton.addEventListener('click', () => {
     isMuted = !isMuted; audioToggleButton.innerText = isMuted ? "Sound: OFF" : "Sound: ON";
-    if (isMuted) { sizzleSoundSource = stopLoopingSound(sizzleSoundSource); rainbowSoundSource = stopLoopingSound(rainbowSoundSource); } 
-    else { initAudio(); playSound('click', {gain: 0.4}); if (playerBubble && playerBubble.type === 'bomb') sizzleSoundSource = playLoopingSound('sizzle', { gain: 0.15 }); if (playerBubble && playerBubble.type === 'rainbow') { rainbowSoundSource = playLoopingSound('rainbow', { gain: 0.2 }); } }
+    if (isMuted) { 
+        sizzleSoundSource = stopLoopingSound(sizzleSoundSource); 
+        rainbowSoundSource = stopLoopingSound(rainbowSoundSource); 
+    } else { 
+        initAudio();
+        playSound('click', {gain: 0.4}); 
+        if (playerBubble && playerBubble.type === 'bomb' && gameState === 'playing') sizzleSoundSource = playLoopingSound('sizzle', { gain: 0.15 }); 
+        if (playerBubble && playerBubble.type === 'rainbow' && gameState === 'playing') { rainbowSoundSource = playLoopingSound('rainbow', { gain: 0.2 }); } 
+    }
 });
+pauseButton.addEventListener('click', () => {
+    if (gameState === 'playing') {
+        gameState = 'paused';
+        pauseOverlay.style.display = 'flex';
+        setTimeout(() => pauseOverlay.style.opacity = 1, 10);
+        sizzleSoundSource = stopLoopingSound(sizzleSoundSource);
+        rainbowSoundSource = stopLoopingSound(rainbowSoundSource);
+    }
+});
+resumeButton.addEventListener('click', async () => {
+    if (gameState === 'paused') {
+        pauseOverlay.style.opacity = 0;
+        await delay(500);
+        pauseOverlay.style.display = 'none';
+        gameState = 'playing';
+        if (!isMuted && playerBubble) {
+            if (playerBubble.type === 'bomb') sizzleSoundSource = playLoopingSound('sizzle', { gain: 0.15 });
+            if (playerBubble.type === 'rainbow') rainbowSoundSource = playLoopingSound('rainbow', { gain: 0.2 });
+        }
+    }
+});
+
 if(isMobile){canvas.addEventListener('touchmove',e=>{e.preventDefault();handleAimUpdate(e.touches[0].clientX,e.touches[0].clientY)},{passive:false});canvas.addEventListener('touchend',e=>{e.preventDefault();handleFire()},{passive:false})}else{canvas.addEventListener('mousemove',e=>{handleAimUpdate(e.clientX,e.clientY)});canvas.addEventListener('click',handleFire)}
 function initBackground() { bgCanvas.width = window.innerWidth; bgCanvas.height = window.innerHeight; backgroundBubbles = []; let bubbleCount = 30; for (let i = 0; i < bubbleCount; i++) { backgroundBubbles.push({ x: Math.random() * bgCanvas.width, y: Math.random() * bgCanvas.height, radius: Math.random() * 25 + 10, speed: Math.random() * 1 + 0.5, opacity: Math.random() * 0.3 + 0.1 });}}
 function updateBackgroundBubbles() { for (let i = 0; i < backgroundBubbles.length; i++) { const b = backgroundBubbles[i]; b.y -= b.speed; if (b.y < -b.radius) { b.y = bgCanvas.height + b.radius; b.x = Math.random() * bgCanvas.width; b.speed = Math.random() * 1 + 0.5; b.radius = Math.random() * 25 + 10; }}}
@@ -1088,21 +1601,53 @@ function drawBackgroundBubbles() { bgCtx.clearRect(0, 0, bgCanvas.width, bgCanva
 window.addEventListener('resize', initBackground);
 
 function gameLoop() {
-    updateBackgroundBubbles(); drawBackgroundBubbles();
-    if (gameState === 'playing') update();
-    if (gameState === 'gameover') { if (fireworks.length > 0) updateFireworks(); if (rain.length > 0) updateRain(); }
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    drawGrid();
-    if(gameState==='playing')drawBubble(ctx,playerBubble);
-    if(gameState==='playing'&&!isFiring)drawAimingLine();
-    drawPopAnimations(); drawFloatingPoints(); drawBombSparks(); drawShockwaves(); drawGameOverLine();
-    drawStaticSparks(); drawStaticBubbleSparks(); drawComboAnnouncer();
+    updateBackgroundBubbles();
+    drawBackgroundBubbles();
+
+    // --- LOGIC UPDATES ---
+    if (gameState === 'splash') {
+        updateSplashScreen();
+    } else if (gameState === 'playing') {
+        update();
+    }
+    updatePopAnimations();
+    if (gameState === 'gameover') {
+        if (fireworks.length > 0) updateFireworks();
+        if (rain.length > 0) updateRain();
+    }
+
+    // --- RENDERING ---
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (gameState === 'splash') {
+        renderSplashScreen();
+    } else if (gameState === 'intro') {
+        drawIntroAnimation();
+    } else if (gameState !== 'rules' && gameState !== 'pregame') {
+        drawGrid();
+        if (gameState === 'playing' || gameState === 'paused') drawBubble(ctx, playerBubble);
+        if (gameState === 'playing' && !isFiring) drawAimingLine();
+        drawGameOverLine();
+    }
+
+    drawPopAnimations();
+    drawFloatingPoints();
+    drawBombSparks();
+    drawShockwaves();
+    drawStaticSparks();
+    drawStaticBubbleSparks();
+    drawComboAnnouncer();
     drawGlitterParticles();
-    if(gameState === 'gameover') { drawFireworks(); drawRain(); }
+
+    if (gameState === 'gameover') {
+        drawFireworks();
+        drawRain();
+    }
+
     requestAnimationFrame(gameLoop);
 }
 
-initBackground(); init(); gameLoop();
+runGame();
 </script>
 </body>
 </html>

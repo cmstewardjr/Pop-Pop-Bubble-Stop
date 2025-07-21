@@ -399,6 +399,7 @@ let screenShake = { magnitude: 0, duration: 0 };
 let comboAnnouncer = { text: '', life: 0, x: 0, y: 0 };
 let staticSparks = [], staticBubbleSparks = [], glitterParticles = [];
 let trajectory = { path: [], snapPoint: null };
+let introWasSkipped = false; 
 // --- State object for the canvas-based intro ---
 let introState = {
     text: '',
@@ -456,15 +457,45 @@ function resetForNextLevel() {
     popAnimations = []; floatingPoints = []; fireworks = []; rain = []; bombSparks = []; shockwaves = []; staticSparks = []; staticBubbleSparks = []; glitterParticles = [];
     gridRowOffset = 0;
 
-    for (let r = 0; r < 4; r++) {
+    const initialRows = 4;
+    const bubblePositions = [];
+    for (let r = 0; r < initialRows; r++) {
         for (let c = 0; c < COLS; c++) {
-            const rand = Math.random();
-            if (rand < 0.08) {
-                grid[r][c] = createBubble(r, c, null, SPECIALS.BRICK);
-            } else {
-                const randomColor = currentColors[Math.floor(Math.random() * currentColors.length)];
-                grid[r][c] = createBubble(r, c, randomColor);
-            }
+            bubblePositions.push({ r, c });
+        }
+    }
+
+    for (let i = bubblePositions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [bubblePositions[i], bubblePositions[j]] = [bubblePositions[j], bubblePositions[i]];
+    }
+
+    const numBricks = Math.floor(bubblePositions.length * 0.08);
+    const colorsToPlace = [];
+    const numColorBubbles = bubblePositions.length - numBricks;
+    const repsPerColor = Math.floor(numColorBubbles / currentColors.length);
+
+    for (const color of currentColors) {
+        for (let i = 0; i < repsPerColor; i++) {
+            colorsToPlace.push(color);
+        }
+    }
+    while (colorsToPlace.length < numColorBubbles) {
+        colorsToPlace.push(currentColors[Math.floor(Math.random() * currentColors.length)]);
+    }
+
+    for (let i = colorsToPlace.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [colorsToPlace[i], colorsToPlace[j]] = [colorsToPlace[j], colorsToPlace[i]];
+    }
+
+    for (let i = 0; i < bubblePositions.length; i++) {
+        const pos = bubblePositions[i];
+        if (i < numBricks) {
+            grid[pos.r][pos.c] = createBubble(pos.r, pos.c, null, SPECIALS.BRICK);
+        } else {
+            const color = colorsToPlace.pop();
+            grid[pos.r][pos.c] = createBubble(pos.r, pos.c, color);
         }
     }
 
@@ -951,21 +982,15 @@ async function handlePostSnap(row, col) {
     const coordsToPop = new Set();
     const damagedBricksThisTurn = new Set();
     
-    // --- CORRECTED LIFE BUBBLE WILD CARD LOGIC ---
     if (landedBubble.type === 'normal') {
         const neighbors = getNeighbors(row, col);
         for (const neighborCoord of neighbors) {
             const neighborBubble = grid[neighborCoord.r]?.[neighborCoord.c];
             if (neighborBubble && neighborBubble.type === SPECIALS.LIFE) {
-                // Temporarily change the Life bubble's color to test for a match
                 const originalType = neighborBubble.type;
                 neighborBubble.color = landedBubble.color;
-                neighborBubble.type = 'normal'; // Temporarily treat as normal for matching
-
-                // Run a full match check starting from the landed bubble
+                neighborBubble.type = 'normal';
                 const potentialMatch = findMatches(row, col);
-                
-                // Revert the Life bubble to its original state
                 neighborBubble.color = '#ffffff';
                 neighborBubble.type = originalType;
 
@@ -977,18 +1002,24 @@ async function handlePostSnap(row, col) {
         }
     }
     
-    // Check for standard matches if no wildcard match was found yet
     if (coordsToPop.size === 0) {
         if (landedBubble.type === SPECIALS.RAINBOW) {
             const neighbors = getNeighbors(row, col).map(n => grid[n.r]?.[n.c]).filter(b => b && (b.type === 'normal' || b.type === 'static'));
             const candidateColors = new Set(neighbors.map(n => n.color));
-            let bestColor = null, maxMatchSize = 0;
+            let bestMatch = [];
             for (const color of candidateColors) {
-                const potentialMatches = findMatches(row, col, color);
-                if (potentialMatches.length > maxMatchSize) { maxMatchSize = potentialMatches.length; bestColor = color; }
+                const potentialMatch = findMatches(row, col, color);
+                if (potentialMatch.length > bestMatch.length) {
+                    bestMatch = potentialMatch;
+                }
             }
-            landedBubble.color = (bestColor && maxMatchSize >= 2) ? bestColor : (neighbors[0]?.color || ALL_COLORS[level][0]);
-            landedBubble.type = 'normal';
+            if (bestMatch.length >= 3) {
+                playSound('rainbow', { gain: 0.6 });
+                bestMatch.forEach(coord => coordsToPop.add(`${coord.r},${coord.c}`));
+            } else {
+                landedBubble.color = (neighbors[0]?.color || currentColors[0]);
+                landedBubble.type = 'normal';
+            }
         } else if (landedBubble.type === SPECIALS.PAINT) {
             playSound('magical', { gain: 0.6 });
             getNeighbors(row, col).forEach(n => {
@@ -1018,24 +1049,28 @@ async function handlePostSnap(row, col) {
             const [r, c] = coordStr.split(',').map(Number);
             const bubble = grid[r]?.[c];
 
-            // Trigger statics
             if (bubble && bubble.type === SPECIALS.STATIC) {
-                const candidates = [];
-                for (let r2 = 0; r2 < ROWS; r2++) for (let c2 = 0; c2 < COLS; c2++) {
-                    if (grid[r2][c2]?.color === bubble.color && !finalCoordsToPop.has(`${r2},${c2}`)) candidates.push({ r: r2, c: c2 });
+                let candidates = [];
+                for (let r2 = 0; r2 < ROWS; r2++) {
+                    for (let c2 = 0; c2 < COLS; c2++) {
+                        if (grid[r2][c2]?.color === bubble.color && !finalCoordsToPop.has(`${r2},${c2}`)) {
+                            candidates.push({ r: r2, c: c2 });
+                        }
+                    }
                 }
-                if (candidates.length > 0) {
-                    const targetBubbleCoord = candidates[Math.floor(Math.random() * candidates.length)];
-                    if (!finalCoordsToPop.has(`${targetBubbleCoord.r},${targetBubbleCoord.c}`)) {
+                for (let i = 0; i < 2; i++) {
+                    if (candidates.length > 0) {
+                        const randomIndex = Math.floor(Math.random() * candidates.length);
+                        const targetBubbleCoord = candidates[randomIndex];
                         finalCoordsToPop.add(`${targetBubbleCoord.r},${targetBubbleCoord.c}`);
+                        newAdditions = true;
                         const targetBubble = grid[targetBubbleCoord.r][targetBubbleCoord.c];
                         staticSparks.push({ fromX: bubble.x, fromY: bubble.y, toX: targetBubble.x, toY: targetBubble.y, life: 0, duration: 15 });
-                        newAdditions = true;
+                        candidates.splice(randomIndex, 1);
                     }
                 }
             }
             
-            // Trigger adjacent specials
             for (const neighborCoord of getNeighbors(r, c)) {
                 const neighborStr = `${neighborCoord.r},${neighborCoord.c}`;
                 const neighborBubble = grid[neighborCoord.r]?.[neighborCoord.c];
@@ -1049,7 +1084,25 @@ async function handlePostSnap(row, col) {
                         neighborBubble.health--; playSound('crack', { gain: 0.7 }); damagedBricksThisTurn.add(neighborStr);
                         if (neighborBubble.health <= 0) { finalCoordsToPop.add(neighborStr); newAdditions = true; }
                     } else if (neighborBubble.type === SPECIALS.LIFE) {
-                        finalCoordsToPop.add(neighborStr); newAdditions = true;
+                        finalCoordsToPop.add(neighborStr);
+                        newAdditions = true;
+                        const lifeNeighbors = getNeighbors(neighborCoord.r, neighborCoord.c);
+                        for (const lifeNeighborCoord of lifeNeighbors) {
+                            const lifeNeighborStr = `${lifeNeighborCoord.r},${lifeNeighborCoord.c}`;
+                            const lifeNeighborBubble = grid[lifeNeighborCoord.r]?.[lifeNeighborCoord.c];
+                            if (lifeNeighborBubble && (lifeNeighborBubble.type === 'normal' || lifeNeighborBubble.type === 'static') && !finalCoordsToPop.has(lifeNeighborStr)) {
+                                const potentialChain = findMatches(lifeNeighborCoord.r, lifeNeighborCoord.c);
+                                if (potentialChain.length >= 3) {
+                                    playSound('magical', { gain: 0.7 });
+                                    potentialChain.forEach(chainCoord => {
+                                        const chainCoordStr = `${chainCoord.r},${chainCoord.c}`;
+                                        if (!finalCoordsToPop.has(chainCoordStr)) {
+                                            finalCoordsToPop.add(chainCoordStr);
+                                        }
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1304,13 +1357,37 @@ function animateIntroValue(startScale, endScale, duration) {
     });
 }
 async function startIntro() {
-    introState.text = 'Pop!'; await animateIntroValue(0.03, 1, 600); await delay(1500);
+    introWasSkipped = false; // Reset the skip flag for the new intro sequence
+    
+    introState.text = 'Pop!'; await animateIntroValue(0.03, 1, 600);
+    if (introWasSkipped) return; // Check if skipped
+    await delay(1500);
+    if (introWasSkipped) return;
+
     introState.opacity = 0; createPopEffectForText(introState.text, '', -20); await delay(1000);
-    introState.text = 'Pop!'; await animateIntroValue(0.03, 1, 600); await delay(1500);
+    if (introWasSkipped) return;
+    
+    introState.text = 'Pop!'; await animateIntroValue(0.03, 1, 600);
+    if (introWasSkipped) return;
+    await delay(1500);
+    if (introWasSkipped) return;
+    
     introState.opacity = 0; createPopEffectForText(introState.text, '', -20); await delay(1000);
-    introState.text = 'Bubble'; await animateIntroValue(0.03, 1, 800); await delay(1200);
-    introState.shakeDuration = 25; await delay(450); introState.shakeDuration = 0; await delay(200);
+    if (introWasSkipped) return;
+    
+    introState.text = 'Bubble'; await animateIntroValue(0.03, 1, 800);
+    if (introWasSkipped) return;
+    await delay(1200);
+    if (introWasSkipped) return;
+
+    introState.shakeDuration = 25; await delay(450);
+    if (introWasSkipped) return;
+    introState.shakeDuration = 0; await delay(200);
+    if (introWasSkipped) return;
+    
     introState.opacity = 0; createPopEffectForText('Bubble', 'Stop!'); await delay(1500);
+    if (introWasSkipped) return;
+
     rulesOverlay.style.display = 'flex'; await delay(50); rulesOverlay.style.opacity = 1;
     gameState = 'rules';
 }
@@ -1402,6 +1479,24 @@ resumeButton.addEventListener('click', async () => {
         if (!isMuted && playerBubble) { if (playerBubble.type === 'bomb') sizzleSoundSource = playLoopingSound('sizzle', { gain: 0.15 }); if (playerBubble.type === 'rainbow') rainbowSoundSource = playLoopingSound('rainbow', { gain: 0.2 }); }
     }
 });
+
+function handleIntroSkip() {
+    if (gameState === 'intro' && !introWasSkipped) {
+        introWasSkipped = true; // Set the flag to true
+        playSound('click', {gain: 0.4});
+        
+        // Immediately stop animations and jump to the rules screen
+        popAnimations = []; // Clear any visual effects from the intro
+        introState = { text: '', scale: 0, opacity: 0, shakeDuration: 0, shakeMagnitude: 6 }; // Reset intro visuals
+        
+        gameState = 'rules';
+        rulesOverlay.style.display = 'flex';
+        setTimeout(() => rulesOverlay.style.opacity = 1, 20); // Fade in the rules
+    }
+}
+canvas.addEventListener('click', handleIntroSkip);
+canvas.addEventListener('touchstart', handleIntroSkip);
+
 if(isMobile){canvas.addEventListener('touchmove',e=>{e.preventDefault();handleAimUpdate(e.touches[0].clientX,e.touches[0].clientY)},{passive:false});canvas.addEventListener('touchend',e=>{e.preventDefault();handleFire()},{passive:false})}else{canvas.addEventListener('mousemove',e=>{handleAimUpdate(e.clientX,e.clientY)});canvas.addEventListener('click',handleFire)}
 function initBackground() { bgCanvas.width = window.innerWidth; bgCanvas.height = window.innerHeight; backgroundBubbles = []; let bubbleCount = 30; for (let i = 0; i < bubbleCount; i++) { backgroundBubbles.push({ x: Math.random() * bgCanvas.width, y: Math.random() * bgCanvas.height, radius: Math.random() * 25 + 10, speed: Math.random() * 1 + 0.5, opacity: Math.random() * 0.3 + 0.1 });}}
 function updateBackgroundBubbles() { for (let i = 0; i < backgroundBubbles.length; i++) { const b = backgroundBubbles[i]; b.y -= b.speed; if (b.y < -b.radius) { b.y = bgCanvas.height + b.radius; b.x = Math.random() * bgCanvas.width; b.speed = Math.random() * 1 + 0.5; b.radius = Math.random() * 25 + 10; }}}

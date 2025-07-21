@@ -981,27 +981,7 @@ async function handlePostSnap(row, col) {
 
     const coordsToPop = new Set();
     const damagedBricksThisTurn = new Set();
-    
-    if (landedBubble.type === 'normal') {
-        const neighbors = getNeighbors(row, col);
-        for (const neighborCoord of neighbors) {
-            const neighborBubble = grid[neighborCoord.r]?.[neighborCoord.c];
-            if (neighborBubble && neighborBubble.type === SPECIALS.LIFE) {
-                const originalType = neighborBubble.type;
-                neighborBubble.color = landedBubble.color;
-                neighborBubble.type = 'normal';
-                const potentialMatch = findMatches(row, col);
-                neighborBubble.color = '#ffffff';
-                neighborBubble.type = originalType;
 
-                if (potentialMatch.length >= 3) {
-                    potentialMatch.forEach(coord => coordsToPop.add(`${coord.r},${coord.c}`));
-                    playSound('magical', { gain: 0.7 });
-                }
-            }
-        }
-    }
-    
     if (coordsToPop.size === 0) {
         if (landedBubble.type === SPECIALS.RAINBOW) {
             const neighbors = getNeighbors(row, col).map(n => grid[n.r]?.[n.c]).filter(b => b && (b.type === 'normal' || b.type === 'static'));
@@ -1034,7 +1014,26 @@ async function handlePostSnap(row, col) {
             getBombAffectedCoords(row, col).forEach(coordStr => coordsToPop.add(coordStr));
         } else if (landedBubble.type !== SPECIALS.BRICK) {
             const matches = findMatches(row, col);
-            if (matches.length >= 3) { matches.forEach(coord => coordsToPop.add(`${coord.r},${coord.c}`)); }
+            if (matches.length >= 3) {
+                matches.forEach(coord => coordsToPop.add(`${coord.r},${coord.c}`));
+            } else if (matches.length > 0) {
+                let lifeBubbleNeighborCoord = null;
+                for (const matchCoord of matches) {
+                    for (const neighbor of getNeighbors(matchCoord.r, matchCoord.c)) {
+                        const bubble = grid[neighbor.r]?.[neighbor.c];
+                        if (bubble && bubble.type === SPECIALS.LIFE) {
+                            lifeBubbleNeighborCoord = neighbor;
+                            break;
+                        }
+                    }
+                    if (lifeBubbleNeighborCoord) break;
+                }
+                if (lifeBubbleNeighborCoord && (matches.length + 1) >= 3) {
+                    playSound('magical', { gain: 0.7 });
+                    matches.forEach(coord => coordsToPop.add(`${coord.r},${coord.c}`));
+                    coordsToPop.add(`${lifeBubbleNeighborCoord.r},${lifeBubbleNeighborCoord.c}`);
+                }
+            }
         }
     }
     
@@ -1048,8 +1047,33 @@ async function handlePostSnap(row, col) {
         for (const coordStr of currentPopSetSnapshot) {
             const [r, c] = coordStr.split(',').map(Number);
             const bubble = grid[r]?.[c];
+            if (!bubble) continue;
 
-            if (bubble && bubble.type === SPECIALS.STATIC) {
+            // --- NEW & IMPROVED Life Bubble Chain Reaction Logic ---
+            // If a Life Bubble is popped, check if its removal creates new matches around it.
+            if (bubble.type === SPECIALS.LIFE) {
+                for (const neighborCoord of getNeighbors(r, c)) {
+                    const neighborStr = `${neighborCoord.r},${neighborCoord.c}`;
+                    const neighborBubble = grid[neighborCoord.r]?.[neighborCoord.c];
+                    
+                    if (neighborBubble && (neighborBubble.type === 'normal' || neighborBubble.type === 'static') && !finalCoordsToPop.has(neighborStr)) {
+                        const potentialChain = findMatches(neighborCoord.r, neighborCoord.c);
+                        if (potentialChain.length >= 3) {
+                            playSound('magical', { gain: 0.7 });
+                            potentialChain.forEach(chainCoord => {
+                                const chainCoordStr = `${chainCoord.r},${chainCoord.c}`;
+                                if (!finalCoordsToPop.has(chainCoordStr)) {
+                                    finalCoordsToPop.add(chainCoordStr);
+                                    newAdditions = true; 
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+            // --- End of new logic ---
+            
+            if (bubble.type === SPECIALS.STATIC) {
                 let candidates = [];
                 for (let r2 = 0; r2 < ROWS; r2++) {
                     for (let c2 = 0; c2 < COLS; c2++) {
@@ -1083,27 +1107,7 @@ async function handlePostSnap(row, col) {
                     } else if (neighborBubble.type === SPECIALS.BRICK && !damagedBricksThisTurn.has(neighborStr)) {
                         neighborBubble.health--; playSound('crack', { gain: 0.7 }); damagedBricksThisTurn.add(neighborStr);
                         if (neighborBubble.health <= 0) { finalCoordsToPop.add(neighborStr); newAdditions = true; }
-                    } else if (neighborBubble.type === SPECIALS.LIFE) {
-                        finalCoordsToPop.add(neighborStr);
-                        newAdditions = true;
-                        const lifeNeighbors = getNeighbors(neighborCoord.r, neighborCoord.c);
-                        for (const lifeNeighborCoord of lifeNeighbors) {
-                            const lifeNeighborStr = `${lifeNeighborCoord.r},${lifeNeighborCoord.c}`;
-                            const lifeNeighborBubble = grid[lifeNeighborCoord.r]?.[lifeNeighborCoord.c];
-                            if (lifeNeighborBubble && (lifeNeighborBubble.type === 'normal' || lifeNeighborBubble.type === 'static') && !finalCoordsToPop.has(lifeNeighborStr)) {
-                                const potentialChain = findMatches(lifeNeighborCoord.r, lifeNeighborCoord.c);
-                                if (potentialChain.length >= 3) {
-                                    playSound('magical', { gain: 0.7 });
-                                    potentialChain.forEach(chainCoord => {
-                                        const chainCoordStr = `${chainCoord.r},${chainCoord.c}`;
-                                        if (!finalCoordsToPop.has(chainCoordStr)) {
-                                            finalCoordsToPop.add(chainCoordStr);
-                                        }
-                                    });
-                                }
-                            }
-                        }
-                    }
+                    } 
                 }
             }
         }
@@ -1118,9 +1122,9 @@ async function handlePostSnap(row, col) {
             const [r, c] = coordStr.split(',').map(Number);
             const bubble = grid[r]?.[c];
             if (bubble) {
-                if (bubble.type === SPECIALS.BRICK) brickBonus += 100;
+                if (bubble.type === SPECIALS.BRICK) brickBonus += 150;
                 else if (floaters.some(fb => `${fb.r},${fb.c}` === coordStr)) dropPoints += 50;
-                else if (bubble.type !== SPECIALS.LIFE) totalPoints += 75;
+                else if (bubble.type !== SPECIALS.LIFE) totalPoints += 100;
                 if (bubble.type === 'life') lifeBubblesPopped++;
                 else if (bubble.type !== 'bomb') { playSound('pop', { gain: 0.4, playbackRate: 1.0 + popCounter * 0.05 }); popCounter++; }
                 createPopEffect(bubble.x, bubble.y, bubble.color);
@@ -1146,12 +1150,12 @@ async function handlePostSnap(row, col) {
         if (grid.flat().some(b => b?.type === SPECIALS.BRICK)) endGame(false); 
         else {
             if (level < MAX_LEVEL) {
-                level++; updateLevelStyles(level); currentColors = ALL_COLORS[level]; gameState = 'levelup'; playSound('levelUp', { gain: 0.6 }); levelUpMessageEl.innerText = `Board Cleared! Moving to Level ${level}!`; levelUpOverlay.style.display = 'flex';
+                level++; updateLevelStyles(level); currentColors = ALL_COLORS[level]; gameState = 'levelup'; playSound('levelUp', { gain: 0.6 }); levelUpMessageEl.innerText = `Board Cleared! Moving to Level ${level}!`; levelUpOverlay.style.display = 'flex'; setTimeout(() => levelUpOverlay.style.opacity = 1, 10);
             } else endGame(true);
         }
         return;
     }
-    if (level < MAX_LEVEL && score >= LEVEL_UP_SCORES[level]) { level++; updateLevelStyles(level); currentColors = ALL_COLORS[level]; gameState = 'levelup'; playSound('levelUp', { gain: 0.5 }); levelUpMessageEl.innerText = `You've reached Level ${level}! Get ready for a new board with new colors!`; levelUpOverlay.style.display = 'flex'; return; }
+    if (level < MAX_LEVEL && score >= LEVEL_UP_SCORES[level]) { level++; updateLevelStyles(level); currentColors = ALL_COLORS[level]; gameState = 'levelup'; playSound('levelUp', { gain: 0.5 }); levelUpMessageEl.innerText = `You've reached Level ${level}! Get ready for a new board with new colors!`; levelUpOverlay.style.display = 'flex'; setTimeout(() => levelUpOverlay.style.opacity = 1, 10); return; }
     for (let c = 0; c < COLS; c++) if (grid[ROWS - 1][c]) { endGame(false); return; }
     if (shotsFired >= SHOTS_UNTIL_LOSS) { endGame(false); return; }
     prepareNextShot();
@@ -1445,7 +1449,7 @@ document.getElementById('play-button').addEventListener('click', async ()=>{
 });
 document.getElementById('play-again-button').addEventListener('click', async ()=>{
     playSound('click',{gain:0.4}); gameOverEl.style.opacity = 0; await delay(500); gameOverEl.style.display='none';
-    startOverlay.style.opacity = 0; startOverlay.style.display='flex'; await delay(20); startOverlay.style.opacity = 1;
+    startOverlay.style.opacity = 0; startOverlay.style.display = 'flex'; await delay(20); startOverlay.style.opacity = 1;
     gameState = 'pregame';
 });
 document.getElementById('restart-button').addEventListener('click', async () => {

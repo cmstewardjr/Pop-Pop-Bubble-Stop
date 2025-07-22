@@ -498,17 +498,19 @@ function resetForNextLevel() {
             grid[pos.r][pos.c] = createBubble(pos.r, pos.c, color);
         }
     }
-
-    if (level === 2 || level === 3 || level === 4) {
+    
+    for (let i = 0; i < 2; i++) {
         let placed = false;
-        while (!placed) {
-            const r = Math.floor(Math.random() * 4);
+        let attempts = 0;
+        while (!placed && attempts < 100) {
+            const r = Math.floor(Math.random() * initialRows);
             const c = Math.floor(Math.random() * COLS);
             if (grid[r][c] && grid[r][c].type === 'normal') {
                 const color = grid[r][c].color;
                 grid[r][c] = createBubble(r, c, color, SPECIALS.STATIC);
                 placed = true;
             }
+            attempts++;
         }
     }
 
@@ -979,66 +981,97 @@ async function handlePostSnap(row, col) {
     let landedBubble = grid[row][col];
     if (!landedBubble) return;
 
-    const coordsToPop = new Set();
+    const initialCoordsToPop = new Set();
     const damagedBricksThisTurn = new Set();
 
-    if (coordsToPop.size === 0) {
-        if (landedBubble.type === SPECIALS.RAINBOW) {
-            const neighbors = getNeighbors(row, col).map(n => grid[n.r]?.[n.c]).filter(b => b && (b.type === 'normal' || b.type === 'static'));
-            const candidateColors = new Set(neighbors.map(n => n.color));
-            let bestMatch = [];
-            for (const color of candidateColors) {
-                const potentialMatch = findMatches(row, col, color);
-                if (potentialMatch.length > bestMatch.length) {
-                    bestMatch = potentialMatch;
-                }
+    // --- Step 1: Find the INITIAL match made by the player ---
+    if (landedBubble.type === SPECIALS.RAINBOW) {
+        const neighbors = getNeighbors(row, col).map(n => grid[n.r]?.[n.c]).filter(b => b && (b.type === 'normal' || b.type === 'static'));
+        const candidateColors = new Set(neighbors.map(n => n.color));
+        let bestMatch = [];
+        for (const color of candidateColors) {
+            const potentialMatch = findMatches(row, col, color);
+            if (potentialMatch.length > bestMatch.length) {
+                bestMatch = potentialMatch;
             }
-            if (bestMatch.length >= 3) {
-                playSound('rainbow', { gain: 0.6 });
-                bestMatch.forEach(coord => coordsToPop.add(`${coord.r},${coord.c}`));
-            } else {
-                landedBubble.color = (neighbors[0]?.color || currentColors[0]);
-                landedBubble.type = 'normal';
-            }
-        } else if (landedBubble.type === SPECIALS.PAINT) {
-            playSound('magical', { gain: 0.6 });
-            getNeighbors(row, col).forEach(n => {
-                const neighborBubble = grid[n.r]?.[n.c];
-                if (neighborBubble && neighborBubble.type === 'normal') { neighborBubble.color = landedBubble.color; }
-            });
-            grid[row][col] = null;
-            const matches = findMatches(row, col, landedBubble.color);
-            if (matches.length >= 3) { matches.forEach(coord => coordsToPop.add(`${coord.r},${coord.c}`)); }
-        } else if (landedBubble.type === 'bomb') {
-            triggerScreenShake(8, 15); playSound('bomb', { gain: 0.6 });
-            getBombAffectedCoords(row, col).forEach(coordStr => coordsToPop.add(coordStr));
-        } else if (landedBubble.type !== SPECIALS.BRICK) {
-            const matches = findMatches(row, col);
-            if (matches.length >= 3) {
-                matches.forEach(coord => coordsToPop.add(`${coord.r},${coord.c}`));
-            } else if (matches.length > 0) {
-                let lifeBubbleNeighborCoord = null;
-                for (const matchCoord of matches) {
-                    for (const neighbor of getNeighbors(matchCoord.r, matchCoord.c)) {
-                        const bubble = grid[neighbor.r]?.[neighbor.c];
-                        if (bubble && bubble.type === SPECIALS.LIFE) {
-                            lifeBubbleNeighborCoord = neighbor;
-                            break;
-                        }
+        }
+        if (bestMatch.length >= 3) {
+            playSound('rainbow', { gain: 0.6 });
+            bestMatch.forEach(coord => initialCoordsToPop.add(`${coord.r},${coord.c}`));
+        } else {
+            landedBubble.color = (neighbors[0]?.color || currentColors[0]);
+            landedBubble.type = 'normal';
+        }
+    } else if (landedBubble.type === SPECIALS.PAINT) {
+        playSound('magical', { gain: 0.6 });
+        getNeighbors(row, col).forEach(n => {
+            const neighborBubble = grid[n.r]?.[n.c];
+            if (neighborBubble && neighborBubble.type === 'normal') { neighborBubble.color = landedBubble.color; }
+        });
+        grid[row][col] = null;
+        const matches = findMatches(row, col, landedBubble.color);
+        if (matches.length >= 3) { matches.forEach(coord => initialCoordsToPop.add(`${coord.r},${coord.c}`)); }
+    } else if (landedBubble.type === 'bomb') {
+        triggerScreenShake(8, 15); playSound('bomb', { gain: 0.6 });
+        getBombAffectedCoords(row, col).forEach(coordStr => initialCoordsToPop.add(coordStr));
+    } else if (landedBubble.type !== SPECIALS.BRICK) {
+        const matches = findMatches(row, col);
+        if (matches.length >= 3) {
+            matches.forEach(coord => initialCoordsToPop.add(`${coord.r},${coord.c}`));
+        } else if (matches.length > 0) {
+            let lifeBubbleNeighborCoord = null;
+            for (const matchCoord of matches) {
+                for (const neighbor of getNeighbors(matchCoord.r, matchCoord.c)) {
+                    const bubble = grid[neighbor.r]?.[neighbor.c];
+                    if (bubble && bubble.type === SPECIALS.LIFE) {
+                        lifeBubbleNeighborCoord = neighbor;
+                        break;
                     }
-                    if (lifeBubbleNeighborCoord) break;
                 }
-                if (lifeBubbleNeighborCoord && (matches.length + 1) >= 3) {
-                    playSound('magical', { gain: 0.7 });
-                    matches.forEach(coord => coordsToPop.add(`${coord.r},${coord.c}`));
-                    coordsToPop.add(`${lifeBubbleNeighborCoord.r},${lifeBubbleNeighborCoord.c}`);
+                if (lifeBubbleNeighborCoord) break;
+            }
+            if (lifeBubbleNeighborCoord && (matches.length + 1) >= 3) {
+                playSound('magical', { gain: 0.7 });
+                matches.forEach(coord => initialCoordsToPop.add(`${coord.r},${coord.c}`));
+                initialCoordsToPop.add(`${lifeBubbleNeighborCoord.r},${lifeBubbleNeighborCoord.c}`);
+            }
+        }
+    }
+
+    const finalCoordsToPop = new Set(initialCoordsToPop);
+
+    // --- Step 2: Handle ONE-TIME triggers from the initial match (like Static) BEFORE cascading ---
+    for (const coordStr of initialCoordsToPop) {
+        const [r, c] = coordStr.split(',').map(Number);
+        const bubble = grid[r]?.[c];
+        if (bubble && bubble.type === SPECIALS.STATIC) {
+            const staticColor = bubble.color;
+            let candidates = [];
+            for (let r2 = 0; r2 < ROWS; r2++) {
+                for (let c2 = 0; c2 < COLS; c2++) {
+                    const targetCoordStr = `${r2},${c2}`;
+                    const targetBubble = grid[r2][c2];
+                    if (targetBubble && !finalCoordsToPop.has(targetCoordStr) && (targetBubble.type === 'normal' || targetBubble.type === 'static') && targetBubble.color === staticColor) {
+                        candidates.push({ r: r2, c: c2 });
+                    }
+                }
+            }
+            for (let i = 0; i < 2; i++) {
+                if (candidates.length > 0) {
+                    const randomIndex = Math.floor(Math.random() * candidates.length);
+                    const targetBubbleCoord = candidates[randomIndex];
+                    const targetBubble = grid[targetBubbleCoord.r][targetBubbleCoord.c];
+                    if (targetBubble) {
+                        finalCoordsToPop.add(`${targetBubbleCoord.r},${targetBubbleCoord.c}`);
+                        staticSparks.push({ fromX: bubble.x, fromY: bubble.y, toX: targetBubble.x, toY: targetBubble.y, life: 0, duration: 15 });
+                        candidates.splice(randomIndex, 1);
+                    }
                 }
             }
         }
     }
     
-    const finalCoordsToPop = new Set(coordsToPop);
-    
+    // --- Step 3: Handle CASCADING effects (Bombs, Bricks, Life Bubbles) ---
     let newAdditions = true;
     while(newAdditions) {
         newAdditions = false;
@@ -1046,58 +1079,12 @@ async function handlePostSnap(row, col) {
 
         for (const coordStr of currentPopSetSnapshot) {
             const [r, c] = coordStr.split(',').map(Number);
-            const bubble = grid[r]?.[c];
-            if (!bubble) continue;
-
-            // --- NEW & IMPROVED Life Bubble Chain Reaction Logic ---
-            // If a Life Bubble is popped, check if its removal creates new matches around it.
-            if (bubble.type === SPECIALS.LIFE) {
-                for (const neighborCoord of getNeighbors(r, c)) {
-                    const neighborStr = `${neighborCoord.r},${neighborCoord.c}`;
-                    const neighborBubble = grid[neighborCoord.r]?.[neighborCoord.c];
-                    
-                    if (neighborBubble && (neighborBubble.type === 'normal' || neighborBubble.type === 'static') && !finalCoordsToPop.has(neighborStr)) {
-                        const potentialChain = findMatches(neighborCoord.r, neighborCoord.c);
-                        if (potentialChain.length >= 3) {
-                            playSound('magical', { gain: 0.7 });
-                            potentialChain.forEach(chainCoord => {
-                                const chainCoordStr = `${chainCoord.r},${chainCoord.c}`;
-                                if (!finalCoordsToPop.has(chainCoordStr)) {
-                                    finalCoordsToPop.add(chainCoordStr);
-                                    newAdditions = true; 
-                                }
-                            });
-                        }
-                    }
-                }
-            }
-            // --- End of new logic ---
             
-            if (bubble.type === SPECIALS.STATIC) {
-                let candidates = [];
-                for (let r2 = 0; r2 < ROWS; r2++) {
-                    for (let c2 = 0; c2 < COLS; c2++) {
-                        if (grid[r2][c2]?.color === bubble.color && !finalCoordsToPop.has(`${r2},${c2}`)) {
-                            candidates.push({ r: r2, c: c2 });
-                        }
-                    }
-                }
-                for (let i = 0; i < 2; i++) {
-                    if (candidates.length > 0) {
-                        const randomIndex = Math.floor(Math.random() * candidates.length);
-                        const targetBubbleCoord = candidates[randomIndex];
-                        finalCoordsToPop.add(`${targetBubbleCoord.r},${targetBubbleCoord.c}`);
-                        newAdditions = true;
-                        const targetBubble = grid[targetBubbleCoord.r][targetBubbleCoord.c];
-                        staticSparks.push({ fromX: bubble.x, fromY: bubble.y, toX: targetBubble.x, toY: targetBubble.y, life: 0, duration: 15 });
-                        candidates.splice(randomIndex, 1);
-                    }
-                }
-            }
-            
+            // Check neighbors of every bubble that is currently set to pop
             for (const neighborCoord of getNeighbors(r, c)) {
                 const neighborStr = `${neighborCoord.r},${neighborCoord.c}`;
                 const neighborBubble = grid[neighborCoord.r]?.[neighborCoord.c];
+                
                 if (neighborBubble && !finalCoordsToPop.has(neighborStr)) {
                     if (neighborBubble.type === SPECIALS.BOMB) {
                         playSound('bomb', { gain: 0.5 }); triggerScreenShake(6, 12);
@@ -1107,7 +1094,10 @@ async function handlePostSnap(row, col) {
                     } else if (neighborBubble.type === SPECIALS.BRICK && !damagedBricksThisTurn.has(neighborStr)) {
                         neighborBubble.health--; playSound('crack', { gain: 0.7 }); damagedBricksThisTurn.add(neighborStr);
                         if (neighborBubble.health <= 0) { finalCoordsToPop.add(neighborStr); newAdditions = true; }
-                    } 
+                    } else if (neighborBubble.type === SPECIALS.LIFE) {
+                        finalCoordsToPop.add(neighborStr);
+                        newAdditions = true;
+                    }
                 }
             }
         }
@@ -1122,11 +1112,21 @@ async function handlePostSnap(row, col) {
             const [r, c] = coordStr.split(',').map(Number);
             const bubble = grid[r]?.[c];
             if (bubble) {
-                if (bubble.type === SPECIALS.BRICK) brickBonus += 150;
-                else if (floaters.some(fb => `${fb.r},${fb.c}` === coordStr)) dropPoints += 50;
-                else if (bubble.type !== SPECIALS.LIFE) totalPoints += 100;
-                if (bubble.type === 'life') lifeBubblesPopped++;
-                else if (bubble.type !== 'bomb') { playSound('pop', { gain: 0.4, playbackRate: 1.0 + popCounter * 0.05 }); popCounter++; }
+                if (bubble.type === SPECIALS.BRICK) {
+                    brickBonus += 150;
+                } else if (floaters.some(fb => `${fb.r},${fb.c}` === coordStr)) {
+                    dropPoints += 50;
+                } else if (bubble.type !== 'bomb') { 
+                    totalPoints += 100;
+                }
+
+                if (bubble.type === 'life') {
+                    lifeBubblesPopped++;
+                } else if (bubble.type !== 'bomb') {
+                    playSound('pop', { gain: 0.4, playbackRate: 1.0 + popCounter * 0.05 });
+                    popCounter++;
+                }
+
                 createPopEffect(bubble.x, bubble.y, bubble.color);
                 grid[r][c] = null;
             }
@@ -1174,16 +1174,26 @@ function addNewRow() {
     newRowsDropped++;
     const newRow = Array(COLS).fill(null);
     const addLifeBubble = (newRowsDropped > 0 && newRowsDropped % 2 === 0);
-    const addStaticBubble = (newRowsDropped > 0 && newRowsDropped % 3 === 0);
-    let lifeCol = -1; if(addLifeBubble) { lifeCol = Math.floor(Math.random() * COLS); }
-    let staticCol = -1; if(addStaticBubble) { do { staticCol = Math.floor(Math.random() * COLS); } while (staticCol === lifeCol); }
-    for (let c = 0; c < COLS; c++) {
-        const rand = Math.random();
-        if (c === lifeCol) newRow[c] = createBubble(0, c, '#ffffff', 'life'); 
-        else if (c === staticCol) newRow[c] = createBubble(0, c, getGridColors()[Math.floor(Math.random() * getGridColors().length)] || currentColors[0], SPECIALS.STATIC);
-        else if (rand < 0.08) newRow[c] = createBubble(0, c, null, SPECIALS.BRICK); 
-        else newRow[c] = createBubble(0, c, null, 'normal'); 
+    let lifeCol = -1; 
+    if(addLifeBubble) { 
+        lifeCol = Math.floor(Math.random() * COLS); 
     }
+    
+    for (let c = 0; c < COLS; c++) {
+        if (c === lifeCol) {
+            newRow[c] = createBubble(0, c, '#ffffff', 'life');
+        } else {
+            const rand = Math.random();
+            if (rand < 0.10) { // 10% chance for a Static Bubble
+                newRow[c] = createBubble(0, c, getGridColors()[Math.floor(Math.random() * getGridColors().length)] || currentColors[0], SPECIALS.STATIC);
+            } else if (rand < 0.18) { // 8% chance for a Brick Bubble
+                newRow[c] = createBubble(0, c, null, SPECIALS.BRICK); 
+            } else { // 82% chance for a Normal Bubble
+                newRow[c] = createBubble(0, c, null, 'normal'); 
+            }
+        }
+    }
+
     grid.unshift(newRow); grid.pop();
     gridRowOffset = (gridRowOffset + 1) % 2;
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
